@@ -70,3 +70,12 @@ exports.remove = async (req, res, next) => {
 		next(error);
 	}
 };
+
+exports.check = async (req, res, next) => {
+  try {
+    const data = await studentService.checkName(req.body || {});
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+};

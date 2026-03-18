@@ -6,6 +6,7 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/meta', studentController.meta);
+router.post('/check', studentController.check);
 router.get('/template', studentController.template);
 router.post('/import', upload.single('file'), studentController.import);
 router.get('/', studentController.list);

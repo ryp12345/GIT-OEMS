@@ -240,6 +240,73 @@ async function resetAllocations(instanceId) {
 	return { message: 'Allocations reset successfully' };
 }
 
+async function runAllocation(instanceId) {
+	const numericId = Number(instanceId);
+	if (!Number.isInteger(numericId) || numericId <= 0) {
+		const error = new Error('Invalid instance id');
+		error.statusCode = 400;
+		throw error;
+	}
+
+	const instance = await instanceModel.getInstanceById(numericId);
+	if (!instance) {
+		const error = new Error('Instance not found');
+		error.statusCode = 404;
+		throw error;
+	}
+
+	// Delegate actual allocation logic to the model
+	return instanceModel.runAllocationByInstance(numericId);
+}
+
+function ensureValidInstanceId(instanceId) {
+	const numericId = Number(instanceId);
+	if (!Number.isInteger(numericId) || numericId <= 0) {
+		const error = new Error('Invalid instance id');
+		error.statusCode = 400;
+		throw error;
+	}
+	return numericId;
+}
+
+async function ensureInstanceExists(numericId) {
+	const instance = await instanceModel.getInstanceById(numericId);
+	if (!instance) {
+		const error = new Error('Instance not found');
+		error.statusCode = 404;
+		throw error;
+	}
+}
+
+async function setFinalPreferences(instanceId) {
+	const numericId = ensureValidInstanceId(instanceId);
+	await ensureInstanceExists(numericId);
+	return instanceModel.setFinalPreferencesByInstance(numericId);
+}
+
+async function rejectUnderSubscribedCourses(instanceId) {
+	const numericId = ensureValidInstanceId(instanceId);
+	await ensureInstanceExists(numericId);
+	return instanceModel.rejectUnderSubscribedCoursesByInstance(numericId);
+}
+
+async function upgradePreferences(instanceId, payload = {}) {
+	const numericId = ensureValidInstanceId(instanceId);
+	await ensureInstanceExists(numericId);
+
+	const rejectedCourseIds = Array.isArray(payload.rejectedCourseIds)
+		? payload.rejectedCourseIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)
+		: [];
+
+	return instanceModel.upgradePreferencesByInstance(numericId, rejectedCourseIds);
+}
+
+async function allocate(instanceId) {
+	const numericId = ensureValidInstanceId(instanceId);
+	await ensureInstanceExists(numericId);
+	return instanceModel.allocateByInstance(numericId);
+}
+
 module.exports = {
 	getInstances,
 	getInstanceView,
@@ -250,4 +317,10 @@ module.exports = {
 	getPreferenceStatistics,
 	getPreferenceStatisticsDetails,
 	resetAllocations
+,
+	runAllocation,
+	setFinalPreferences,
+	rejectUnderSubscribedCourses,
+	upgradePreferences,
+	allocate
 };

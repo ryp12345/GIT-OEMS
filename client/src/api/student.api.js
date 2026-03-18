@@ -16,6 +16,12 @@ export function getStudentMeta(token) {
 	});
 }
 
+export function checkStudentDetails(payload, token) {
+  return api.post('/students/check', payload, {
+    headers: tokenHeaders(token)
+  });
+}
+
 export function downloadStudentTemplate(token) {
 	return api.get('/students/template', {
 		headers: tokenHeaders(token),

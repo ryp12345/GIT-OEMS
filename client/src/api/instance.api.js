@@ -57,3 +57,35 @@ export function resetInstanceAllocations(instanceId, token) {
 		headers: tokenHeaders(token)
 	});
 }
+
+export function runInstanceAllocation(instanceId, token) {
+    return api.post(`/instances/${instanceId}/run-allocation`, {}, {
+        headers: tokenHeaders(token)
+    });
+}
+
+export function setFinalPreferences(instanceId, token) {
+	return api.post(`/instances/${instanceId}/set-final-preferences`, {}, {
+		headers: tokenHeaders(token)
+	});
+}
+
+export function rejectUnderSubscribedCourses(instanceId, token) {
+	return api.post(`/instances/${instanceId}/reject-courses`, {}, {
+		headers: tokenHeaders(token)
+	});
+}
+
+export function upgradePreferences(instanceId, rejectedCourseIds, token) {
+	return api.post(
+		`/instances/${instanceId}/upgrade-preferences`,
+		{ rejectedCourseIds },
+		{ headers: tokenHeaders(token) }
+	);
+}
+
+export function allocateByStep(instanceId, token) {
+	return api.post(`/instances/${instanceId}/allocate`, {}, {
+		headers: tokenHeaders(token)
+	});
+}

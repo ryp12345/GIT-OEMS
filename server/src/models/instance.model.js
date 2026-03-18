@@ -359,6 +359,397 @@ async function resetAllocationsByInstance(instanceId) {
 	}
 }
 
+async function runAllocationByInstance(instanceId) {
+	const client = await pool.connect();
+
+	try {
+		await client.query('BEGIN');
+
+		// 1) Initialize final_preference = preferred for all preferences in this instance
+		await client.query(
+			`UPDATE public.preferences p
+			 SET final_preference = p.preferred
+			 FROM public.instance_courses ic
+			 WHERE p.instance_course_id = ic.id
+			   AND ic.instance_id = $1`,
+			[instanceId]
+		);
+
+		// 2) Reject under-subscribed courses (preferred=1 count < min_intake)
+		const underSubscribedRes = await client.query(
+			`SELECT ic.id
+			 FROM public.instance_courses ic
+			 LEFT JOIN (
+				SELECT instance_course_id, COUNT(*) FILTER (WHERE preferred = 1) AS p1_count
+				FROM public.preferences
+				GROUP BY instance_course_id
+			 ) pref ON pref.instance_course_id = ic.id
+			 WHERE ic.instance_id = $1
+			   AND COALESCE(pref.p1_count, 0) < COALESCE(ic.min_intake, 0)`,
+			[instanceId]
+		);
+
+		for (const row of underSubscribedRes.rows) {
+			const icId = row.id;
+			await client.query(`UPDATE public.instance_courses SET allocation_status = 'Rejected' WHERE id = $1`, [icId]);
+
+			await client.query(`UPDATE public.preferences SET allocation_status = 'Course Rejected', status = -1 WHERE instance_course_id = $1`, [icId]);
+
+			// Shift down final_preference for other preferences of affected students
+			await client.query(
+				`UPDATE public.preferences p1
+				 SET final_preference = p1.final_preference - 1
+				 FROM public.preferences pr
+				 WHERE pr.instance_course_id = $1
+				   AND pr.usn = p1.usn
+				   AND p1.instance_course_id != $1
+				   AND p1.final_preference > pr.final_preference`,
+				[icId]
+			);
+		}
+
+		// 3) Determine maximum final preference remaining for this instance
+		const maxPrefRes = await client.query(
+			`SELECT MAX(p.final_preference) AS max_pref
+			 FROM public.preferences p
+			 JOIN public.instance_courses ic ON ic.id = p.instance_course_id
+			 WHERE ic.instance_id = $1`,
+			[instanceId]
+		);
+
+		const maxPref = Number(maxPrefRes.rows[0].max_pref) || 0;
+
+		// 4) Allocation rounds from preference 1..maxPref
+		for (let pref = 1; pref <= maxPref; pref++) {
+			// fetch pending courses for this preference
+			const coursesRes = await client.query(
+				`SELECT ic.id, ic.max_intake, COALESCE(ic.total_allocations,0) AS total_allocations
+				 FROM public.instance_courses ic
+				 WHERE ic.instance_id = $1
+				   AND COALESCE(ic.allocation_status,'Pending') NOT IN ('Rejected','Allocated')`,
+				[instanceId]
+			);
+
+			for (const course of coursesRes.rows) {
+				const icId = course.id;
+				const available = Math.max(0, Number(course.max_intake || 0) - Number(course.total_allocations || 0));
+				if (available <= 0) {
+					// mark allocated if no seats
+					await client.query(`UPDATE public.instance_courses SET allocation_status = 'Allocated' WHERE id = $1`, [icId]);
+					continue;
+				}
+
+				// count demand
+				const demandRes = await client.query(
+					`SELECT COUNT(*) AS cnt
+					 FROM public.preferences p
+					 WHERE p.instance_course_id = $1
+					   AND p.final_preference = $2
+					   AND p.status = 0`,
+					[icId, pref]
+				);
+
+				const demand = Number(demandRes.rows[0].cnt) || 0;
+
+				if (demand === 0) continue;
+
+				if (demand <= available) {
+					// allocate all
+					await client.query(
+						`UPDATE public.preferences SET status = $1, allocation_status = 'Allotted' WHERE instance_course_id = $2 AND final_preference = $1 AND status = 0`,
+						[pref, icId]
+					);
+
+					// update total_allocations
+					await client.query(
+						`UPDATE public.instance_courses SET total_allocations = COALESCE(total_allocations,0) + $1 WHERE id = $2`,
+						[demand, icId]
+					);
+
+					// mark allocated if full
+					const totalRes = await client.query(`SELECT total_allocations, max_intake FROM public.instance_courses WHERE id = $1`, [icId]);
+					const totalAlloc = Number(totalRes.rows[0].total_allocations || 0);
+					const maxIntake = Number(totalRes.rows[0].max_intake || 0);
+					if (totalAlloc >= maxIntake) {
+						await client.query(`UPDATE public.instance_courses SET allocation_status = 'Allocated' WHERE id = $1`, [icId]);
+						// mark remaining as seats filled
+						await client.query(`UPDATE public.preferences SET status = -final_preference, allocation_status = 'Seats filled at higher preference' WHERE instance_course_id = $1 AND status = 0`, [icId]);
+					}
+				} else {
+					// oversubscribed: allocate top students by grade desc (simplified median logic)
+					const usnRes = await client.query(
+						`SELECT p.usn
+						 FROM public.preferences p
+						 JOIN public.student_academic_records sar ON sar.usn = p.usn
+						 JOIN public.instances i ON i.id = $3
+						 WHERE p.instance_course_id = $1
+						   AND p.final_preference = $2
+						   AND p.status = 0
+						   AND CAST(sar.semester AS INTEGER) = i.semester
+						 ORDER BY NULLIF(REGEXP_REPLACE(COALESCE(sar.grade,''),'[^0-9.]','','g'),'')::NUMERIC DESC
+						 LIMIT $4`,
+						[icId, pref, instanceId, available]
+					);
+
+					const usns = usnRes.rows.map((r) => r.usn);
+					if (usns.length > 0) {
+						const placeholders = usns.map((_, i) => `$${i + 3}`).join(',');
+						const params = [icId, pref, ...usns];
+						// update selected students
+						await client.query(
+							`UPDATE public.preferences SET status = $2, allocation_status = 'Allotted' WHERE instance_course_id = $1 AND usn IN (${placeholders}) AND status = 0`,
+							params
+						);
+
+						// increment total_allocations by number allocated
+						await client.query(
+							`UPDATE public.instance_courses SET total_allocations = COALESCE(total_allocations,0) + $1 WHERE id = $2`,
+							[usns.length, icId]
+						);
+
+						// after selection, if full then mark remaining as seats filled
+						const totalRes2 = await client.query(`SELECT total_allocations, max_intake FROM public.instance_courses WHERE id = $1`, [icId]);
+						const totalAlloc2 = Number(totalRes2.rows[0].total_allocations || 0);
+						const maxIntake2 = Number(totalRes2.rows[0].max_intake || 0);
+						if (totalAlloc2 >= maxIntake2) {
+							await client.query(`UPDATE public.instance_courses SET allocation_status = 'Allocated' WHERE id = $1`, [icId]);
+							await client.query(`UPDATE public.preferences SET status = -final_preference, allocation_status = 'Seats filled at higher preference' WHERE instance_course_id = $1 AND status = 0`, [icId]);
+						}
+					}
+				}
+			}
+		}
+
+		await client.query('COMMIT');
+		return { success: true };
+	} catch (error) {
+		await client.query('ROLLBACK');
+		throw error;
+	} finally {
+		client.release();
+	}
+}
+
+async function setFinalPreferencesByInstance(instanceId) {
+	const client = await pool.connect();
+
+	try {
+		await client.query('BEGIN');
+		await client.query(
+			`UPDATE public.preferences p
+			 SET final_preference = p.preferred
+			 FROM public.instance_courses ic
+			 WHERE p.instance_course_id = ic.id
+			   AND ic.instance_id = $1`,
+			[instanceId]
+		);
+		await client.query('COMMIT');
+		return { success: true };
+	} catch (error) {
+		await client.query('ROLLBACK');
+		throw error;
+	} finally {
+		client.release();
+	}
+}
+
+async function rejectUnderSubscribedCoursesByInstance(instanceId) {
+	const client = await pool.connect();
+
+	try {
+		await client.query('BEGIN');
+
+		const underSubscribedRes = await client.query(
+			`SELECT ic.id AS instance_course_id, ic.coursecode, c.coursename
+			 FROM public.instance_courses ic
+			 JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
+			 LEFT JOIN (
+				SELECT instance_course_id, COUNT(*) FILTER (WHERE preferred = 1) AS p1_count
+				FROM public.preferences
+				GROUP BY instance_course_id
+			 ) pref ON pref.instance_course_id = ic.id
+			 WHERE ic.instance_id = $1
+			   AND COALESCE(pref.p1_count, 0) < COALESCE(ic.min_intake, 0)
+			 ORDER BY c.coursename ASC, ic.coursecode ASC`,
+			[instanceId]
+		);
+
+		for (const row of underSubscribedRes.rows) {
+			const icId = row.instance_course_id;
+			await client.query(`UPDATE public.instance_courses SET allocation_status = 'Rejected' WHERE id = $1`, [icId]);
+			await client.query(
+				`UPDATE public.preferences
+				 SET allocation_status = 'Course Rejected', status = -1
+				 WHERE instance_course_id = $1`,
+				[icId]
+			);
+		}
+
+		await client.query('COMMIT');
+		return { rejectedCourses: underSubscribedRes.rows };
+	} catch (error) {
+		await client.query('ROLLBACK');
+		throw error;
+	} finally {
+		client.release();
+	}
+}
+
+async function upgradePreferencesByInstance(instanceId, rejectedCourseIds) {
+	const client = await pool.connect();
+
+	try {
+		await client.query('BEGIN');
+
+		for (const icId of rejectedCourseIds) {
+			await client.query(
+				`UPDATE public.preferences p1
+				 SET final_preference = p1.final_preference - 1
+				 FROM public.preferences pr
+				 JOIN public.instance_courses ic ON ic.id = pr.instance_course_id
+				 WHERE pr.instance_course_id = $1
+				   AND ic.instance_id = $2
+				   AND pr.usn = p1.usn
+				   AND p1.instance_course_id != $1
+				   AND p1.final_preference > pr.final_preference`,
+				[icId, instanceId]
+			);
+		}
+
+		await client.query('COMMIT');
+		return { success: true };
+	} catch (error) {
+		await client.query('ROLLBACK');
+		throw error;
+	} finally {
+		client.release();
+	}
+}
+
+async function allocateByInstance(instanceId) {
+	const client = await pool.connect();
+
+	try {
+		await client.query('BEGIN');
+
+		const maxPrefRes = await client.query(
+			`SELECT MAX(p.final_preference) AS max_pref
+			 FROM public.preferences p
+			 JOIN public.instance_courses ic ON ic.id = p.instance_course_id
+			 WHERE ic.instance_id = $1`,
+			[instanceId]
+		);
+
+		const maxPref = Number(maxPrefRes.rows[0].max_pref) || 0;
+
+		for (let pref = 1; pref <= maxPref; pref++) {
+			const coursesRes = await client.query(
+				`SELECT ic.id, ic.max_intake, COALESCE(ic.total_allocations, 0) AS total_allocations
+				 FROM public.instance_courses ic
+				 WHERE ic.instance_id = $1
+				   AND COALESCE(ic.allocation_status, 'Pending') NOT IN ('Rejected', 'Allocated')`,
+				[instanceId]
+			);
+
+			for (const course of coursesRes.rows) {
+				const icId = course.id;
+				const available = Math.max(0, Number(course.max_intake || 0) - Number(course.total_allocations || 0));
+				if (available <= 0) {
+					await client.query(`UPDATE public.instance_courses SET allocation_status = 'Allocated' WHERE id = $1`, [icId]);
+					continue;
+				}
+
+				const demandRes = await client.query(
+					`SELECT COUNT(*) AS cnt
+					 FROM public.preferences p
+					 WHERE p.instance_course_id = $1
+					   AND p.final_preference = $2
+					   AND p.status = 0`,
+					[icId, pref]
+				);
+
+				const demand = Number(demandRes.rows[0].cnt) || 0;
+				if (demand === 0) continue;
+
+				if (demand <= available) {
+					await client.query(
+						`UPDATE public.preferences
+						 SET status = $1, allocation_status = 'Allotted'
+						 WHERE instance_course_id = $2
+						   AND final_preference = $1
+						   AND status = 0`,
+						[pref, icId]
+					);
+
+					await client.query(
+						`UPDATE public.instance_courses
+						 SET total_allocations = COALESCE(total_allocations, 0) + $1
+						 WHERE id = $2`,
+						[demand, icId]
+					);
+				} else {
+					const usnRes = await client.query(
+						`SELECT p.usn
+						 FROM public.preferences p
+						 JOIN public.student_academic_records sar ON sar.usn = p.usn
+						 JOIN public.instances i ON i.id = $3
+						 WHERE p.instance_course_id = $1
+						   AND p.final_preference = $2
+						   AND p.status = 0
+						   AND CAST(sar.semester AS INTEGER) = i.semester
+						 ORDER BY NULLIF(REGEXP_REPLACE(COALESCE(sar.grade, ''), '[^0-9.]', '', 'g'), '')::NUMERIC DESC
+						 LIMIT $4`,
+						[icId, pref, instanceId, available]
+					);
+
+					const usns = usnRes.rows.map((r) => r.usn);
+					if (usns.length > 0) {
+						const placeholders = usns.map((_, i) => `$${i + 3}`).join(',');
+						const params = [icId, pref, ...usns];
+						await client.query(
+							`UPDATE public.preferences
+							 SET status = $2, allocation_status = 'Allotted'
+							 WHERE instance_course_id = $1
+							   AND usn IN (${placeholders})
+							   AND status = 0`,
+							params
+						);
+
+						await client.query(
+							`UPDATE public.instance_courses
+							 SET total_allocations = COALESCE(total_allocations, 0) + $1
+							 WHERE id = $2`,
+							[usns.length, icId]
+						);
+					}
+				}
+
+				const totalRes = await client.query(`SELECT total_allocations, max_intake FROM public.instance_courses WHERE id = $1`, [icId]);
+				const totalAlloc = Number(totalRes.rows[0].total_allocations || 0);
+				const maxIntake = Number(totalRes.rows[0].max_intake || 0);
+				if (totalAlloc >= maxIntake) {
+					await client.query(`UPDATE public.instance_courses SET allocation_status = 'Allocated' WHERE id = $1`, [icId]);
+					await client.query(
+						`UPDATE public.preferences
+						 SET status = -final_preference, allocation_status = 'Seats filled at higher preference'
+						 WHERE instance_course_id = $1
+						   AND status = 0`,
+						[icId]
+					);
+				}
+			}
+		}
+
+		await client.query('COMMIT');
+		return { success: true };
+	} catch (error) {
+		await client.query('ROLLBACK');
+		throw error;
+	} finally {
+		client.release();
+	}
+}
+
 module.exports = {
 	listInstances,
 	getInstanceById,
@@ -371,4 +762,10 @@ module.exports = {
 	getPreferenceStatisticsByInstance,
 	getPreferenceStatisticsDetailsByInstance,
 	resetAllocationsByInstance
+,
+	runAllocationByInstance,
+	setFinalPreferencesByInstance,
+	rejectUnderSubscribedCoursesByInstance,
+	upgradePreferencesByInstance,
+	allocateByInstance
 };

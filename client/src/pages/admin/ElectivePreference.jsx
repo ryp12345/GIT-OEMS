@@ -6,7 +6,7 @@ import Notification from '../../components/common/Notification';
 import {
 	getInstances,
 	getPreferenceStatisticsDetails,
-	resetInstanceAllocations
+  resetInstanceAllocations
 } from '../../api/instance.api';
 
 function formatGrade(value) {

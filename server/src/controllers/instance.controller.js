@@ -72,10 +72,55 @@ exports.getPreferenceStatisticsDetails = async (req, res, next) => {
 	}
 };
 
+exports.runAllocation = async (req, res, next) => {
+    try {
+        const data = await instanceService.runAllocation(req.params.id);
+        res.json({ message: 'Allocation run completed', result: data });
+    } catch (error) {
+        next(error);
+    }
+};
+
 exports.resetAllocations = async (req, res, next) => {
 	try {
 		const data = await instanceService.resetAllocations(req.params.id);
 		res.json(data);
+	} catch (error) {
+		next(error);
+	}
+};
+
+exports.setFinalPreferences = async (req, res, next) => {
+	try {
+		const data = await instanceService.setFinalPreferences(req.params.id);
+		res.json({ message: 'Final preferences set', result: data });
+	} catch (error) {
+		next(error);
+	}
+};
+
+exports.rejectUnderSubscribedCourses = async (req, res, next) => {
+	try {
+		const data = await instanceService.rejectUnderSubscribedCourses(req.params.id);
+		res.json({ message: 'Under-subscribed courses rejected', ...data });
+	} catch (error) {
+		next(error);
+	}
+};
+
+exports.upgradePreferences = async (req, res, next) => {
+	try {
+		const data = await instanceService.upgradePreferences(req.params.id, req.body);
+		res.json({ message: 'Preferences upgraded', result: data });
+	} catch (error) {
+		next(error);
+	}
+};
+
+exports.allocate = async (req, res, next) => {
+	try {
+		const data = await instanceService.allocate(req.params.id);
+		res.json({ message: 'Allocation completed', result: data });
 	} catch (error) {
 		next(error);
 	}

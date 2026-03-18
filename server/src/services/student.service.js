@@ -1,5 +1,6 @@
 const studentModel = require('../models/student.model');
 const XLSX = require('xlsx');
+const pool = require('../config/db');
 
 const VALID_SEMESTERS = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
 
@@ -327,6 +328,83 @@ async function removeStudent(id) {
 	await studentModel.deleteAcademicRecordsByUsn(existing.usn);
 }
 
+async function checkName(payload = {}) {
+	const uid = String(payload.uid1 || payload.uid || '').trim();
+	const name = String(payload.name1 || payload.name || '').trim();
+	const usn = String(payload.usn || '').trim();
+
+	if (!uid || !usn || !name) {
+		const error = new Error('uid, usn and name are required');
+		error.statusCode = 400;
+		throw error;
+	}
+
+	// find student matching uid/usn and name containing provided text
+	const studentRes = await pool.query(
+		`SELECT id, name, uid, usn, department_id FROM public.students WHERE UPPER(uid) = UPPER($1) AND UPPER(usn) = UPPER($2) AND name ILIKE '%' || $3 || '%' LIMIT 1`,
+		[uid, usn, name]
+	);
+
+	if (studentRes.rowCount === 0) {
+		const error = new Error('Student not found with the provided details');
+		error.statusCode = 404;
+		throw error;
+	}
+
+	const student = studentRes.rows[0];
+
+	// fetch latest academic record
+	const academic = await studentModel.getLatestAcademicRecordByUsn(student.usn);
+	if (!academic) {
+		const error = new Error('Academic record not found for student');
+		error.statusCode = 404;
+		throw error;
+	}
+
+	// find active instance for the student's semester
+	const instRes = await pool.query(`SELECT id, instancename, semester, academic_year, status FROM public.instances WHERE semester = $1 AND status = 'Active' LIMIT 1`, [Number(academic.semester)]);
+	if (instRes.rowCount === 0) {
+		return { message: 'No active instance for student semester', instance: null };
+	}
+
+	const instance = instRes.rows[0];
+
+	// check if student has existing preferences (for any instance courses)
+	const prefsRes = await pool.query(
+		`SELECT p.preferred, p.final_preference, p.allocation_status, p.status, c.coursename, c.coursecode, p.instance_course_id
+		 FROM public.preferences p
+		 LEFT JOIN public.instance_courses ic ON ic.id = p.instance_course_id AND ic.instance_id = $1
+		 LEFT JOIN public.courses c ON c.coursecode = ic.coursecode
+		 WHERE UPPER(p.usn) = UPPER($2)`,
+		[instance.id, student.usn]
+	);
+
+	if (prefsRes.rowCount > 0) {
+		return { registered: true, preferences: prefsRes.rows };
+	}
+
+	// otherwise list permitted courses for the student's department in this instance
+	const coursesRes = await pool.query(
+		`SELECT ic.id AS icid, ic.*, c.coursename, c.coursecode, eg.group_name
+		 FROM public.instance_courses ic
+		 JOIN public.courses c ON c.coursecode = ic.coursecode
+		 LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
+		 WHERE ic.instance_id = $1
+			 AND ic.id IN (SELECT instance_course_id FROM public.permitted_branches WHERE department_id = $2)
+		 ORDER BY eg.group_name NULLS LAST, c.coursename ASC, c.coursecode ASC`,
+		[instance.id, student.department_id]
+	);
+
+	const grouped = {};
+	for (const row of coursesRes.rows) {
+		const key = row.group_name || 'No Group';
+		if (!grouped[key]) grouped[key] = [];
+		grouped[key].push(row);
+	}
+
+	return { registered: false, instance: { id: instance.id, instancename: instance.instancename }, courses: grouped };
+}
+
 module.exports = {
 	getStudents,
 	getStudentMeta,
@@ -335,4 +413,6 @@ module.exports = {
 	addStudent,
 	editStudent,
 	removeStudent
+  ,
+  checkName
 };
