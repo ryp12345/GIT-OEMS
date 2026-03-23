@@ -170,11 +170,24 @@ export default function ElectivePreferencePage() {
   const [instances, setInstances] = useState([]);
   const [selectedInstance, setSelectedInstance] = useState('#');
   const [rows, setRows] = useState([]);
+  const [grandTotalAllocations, setGrandTotalAllocations] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [error, setError] = useState('');
   const [activeChartRow, setActiveChartRow] = useState(null);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
+
+  function applyPreferenceDetailsResponse(payload) {
+    if (Array.isArray(payload)) {
+      setRows(payload);
+      setGrandTotalAllocations(payload.reduce((sum, row) => sum + Number(row.total_allocations || 0), 0));
+      return;
+    }
+
+    const nextRows = Array.isArray(payload?.rows) ? payload.rows : [];
+    setRows(nextRows);
+    setGrandTotalAllocations(Number(payload?.grandTotalAllocations) || 0);
+  }
 
   useEffect(() => {
     (async function loadInstances() {
@@ -191,6 +204,7 @@ export default function ElectivePreferencePage() {
   useEffect(() => {
     if (!selectedInstance || selectedInstance === '#') {
       setRows([]);
+      setGrandTotalAllocations(0);
       setActiveChartRow(null);
       return;
     }
@@ -200,11 +214,11 @@ export default function ElectivePreferencePage() {
         setIsLoading(true);
         setError('');
         const res = await getPreferenceStatisticsDetails(selectedInstance, token);
-        const data = res?.data || [];
-        setRows(Array.isArray(data) ? data : []);
+        applyPreferenceDetailsResponse(res?.data);
       } catch (err) {
         setError(err?.response?.data?.error || 'Unable to load elective preference details');
         setRows([]);
+        setGrandTotalAllocations(0);
       } finally {
         setIsLoading(false);
       }
@@ -228,8 +242,7 @@ export default function ElectivePreferencePage() {
       showNotification('Allocations reset successfully.', 'success');
 
       const res = await getPreferenceStatisticsDetails(selectedInstance, token);
-      const data = res?.data || [];
-      setRows(Array.isArray(data) ? data : []);
+      applyPreferenceDetailsResponse(res?.data);
       setActiveChartRow(null);
     } catch (err) {
       const message = err?.response?.data?.error || 'Failed to reset allocations.';
@@ -299,10 +312,7 @@ export default function ElectivePreferencePage() {
     window.URL.revokeObjectURL(url);
   }
 
-  const grandTotalAllocations = useMemo(
-    () => rows.reduce((sum, row) => sum + Number(row.total_allocations || 0), 0),
-    [rows]
-  );
+  const hasSelectedInstance = selectedInstance && selectedInstance !== '#';
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -393,9 +403,11 @@ export default function ElectivePreferencePage() {
                       <tr>
                         <td colSpan={16} className="px-6 py-12 text-center text-gray-500">Loading...</td>
                       </tr>
-                    ) : rows.length === 0 ? (
+                    ) : rows.length === 0 && !hasSelectedInstance ? (
                       <tr>
-                        <td colSpan={16} className="px-6 py-12 text-center text-gray-500">Please select an instance to view preferences.</td>
+                      <td colSpan={16} className="px-6 py-12 text-center text-gray-500">
+                      Please select an instance to view preferences.
+                      </td>
                       </tr>
                     ) : (
                       rows.map((row, index) => {
@@ -443,7 +455,7 @@ export default function ElectivePreferencePage() {
                       })
                     )}
 
-                    {rows.length > 0 ? (
+                    {hasSelectedInstance && !isLoading ? (
                       <tr className="bg-gray-200">
                         <td colSpan={13} className="border px-3 py-2 text-sm font-bold">Grand Total Allocations</td>
                         <td className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{grandTotalAllocations}</td>

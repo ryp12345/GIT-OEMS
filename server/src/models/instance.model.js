@@ -32,29 +32,28 @@ async function listDepartments() {
 }
 
 async function listInstanceCourses(instanceId) {
+	// Only return courses that are explicitly mapped for the instance (via instance_courses)
 	const result = await pool.query(
 		`SELECT c.coursecode,
-				c.coursename,
-				c.department_id,
-				d.shortname,
-				ic.id AS instance_course_id,
-				ic.division,
-				ic.min_intake,
-				ic.max_intake,
-				COALESCE(
-					ARRAY_REMOVE(ARRAY_AGG(pb.department_id ORDER BY pb.department_id), NULL),
-					'{}'
-				) AS department_ids
-		 FROM public.instances i
-		 JOIN public.courses c ON c.semester = i.semester
-		 LEFT JOIN public.departments d ON d.deptid = c.department_id
-		 LEFT JOIN public.instance_courses ic
-		 	ON ic.instance_id = i.id
-			AND UPPER(ic.coursecode) = UPPER(c.coursecode)
-		 LEFT JOIN public.permitted_branches pb ON pb.instance_course_id = ic.id
-		 WHERE i.id = $1
-		 GROUP BY c.coursecode, c.coursename, c.department_id, d.shortname, ic.id, ic.division, ic.min_intake, ic.max_intake
-		 ORDER BY d.shortname ASC, c.coursename ASC, c.coursecode ASC`,
+			c.coursename,
+			c.department_id,
+			d.shortname,
+			ic.id AS instance_course_id,
+			ic.division,
+			ic.min_intake,
+			ic.max_intake,
+			COALESCE(
+				ARRAY_REMOVE(ARRAY_AGG(pb.department_id ORDER BY pb.department_id), NULL),
+				'{}'
+			) AS department_ids
+		FROM public.instance_courses ic
+		JOIN public.instances i ON i.id = ic.instance_id
+		JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
+		LEFT JOIN public.departments d ON d.deptid = c.department_id
+		LEFT JOIN public.permitted_branches pb ON pb.instance_course_id = ic.id
+		WHERE ic.instance_id = $1
+		GROUP BY c.coursecode, c.coursename, c.department_id, d.shortname, ic.id, ic.division, ic.min_intake, ic.max_intake
+		ORDER BY d.shortname ASC, c.coursename ASC, c.coursecode ASC`,
 		[instanceId]
 	);
 
@@ -191,8 +190,19 @@ async function getPreferenceStatisticsByInstance(instanceId) {
 	}));
 }
 
-async function getPreferenceStatisticsDetailsByInstance(instanceId) {
-	const detailsResult = await pool.query(
+async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}) {
+	const strictSarJoin = options.strictSarJoin !== false;
+	const strictCourseFilterClause = strictSarJoin ? 'HAVING COUNT(pd.instance_course_id) > 0' : '';
+	const sarJoinClause = strictSarJoin
+		? `JOIN public.student_academic_records sar
+			ON sar.usn = p.usn
+			AND CAST(sar.semester AS INTEGER) = i.semester`
+		: `LEFT JOIN public.student_academic_records sar
+			ON sar.usn = p.usn
+			AND CAST(sar.semester AS INTEGER) = i.semester`;
+
+	const [detailsResult, chartResult] = await Promise.all([
+		pool.query(
 		`WITH preference_data AS (
 			SELECT
 				p.instance_course_id,
@@ -202,9 +212,7 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId) {
 			FROM public.preferences p
 			JOIN public.instance_courses ic ON ic.id = p.instance_course_id
 			JOIN public.instances i ON i.id = ic.instance_id
-			LEFT JOIN public.student_academic_records sar
-				ON sar.usn = p.usn
-				AND CAST(sar.semester AS INTEGER) = i.semester
+			${sarJoinClause}
 			WHERE ic.instance_id = $1
 		)
 		SELECT
@@ -225,15 +233,18 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId) {
 			COALESCE(ic.total_allocations, 0) AS total_allocations,
 			COALESCE(NULLIF(ic.allocation_status, ''), 'Pending') AS allocation_status
 		FROM public.instance_courses ic
+		JOIN public.instances i ON i.id = ic.instance_id
 		JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
+			AND CAST(c.semester AS INTEGER) = i.semester
 		LEFT JOIN preference_data pd ON pd.instance_course_id = ic.id
 		WHERE ic.instance_id = $1
 		GROUP BY ic.id, c.coursename, ic.coursecode, ic.division, ic.min_intake, ic.max_intake, ic.total_allocations, ic.allocation_status
+		${strictCourseFilterClause}
 		ORDER BY c.coursename ASC, ic.coursecode ASC`,
 		[instanceId]
-	);
+		),
 
-	const chartResult = await pool.query(
+		pool.query(
 		`WITH chart_data AS (
 			SELECT
 				p.instance_course_id,
@@ -259,14 +270,15 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId) {
 				LIMIT 1
 			) g ON true
 			WHERE ic.instance_id = $1
-			  AND LOWER(COALESCE(p.allocation_status, '')) = 'allotted'
+			  AND p.status = p.final_preference
 			GROUP BY p.instance_course_id, p.final_preference, grade_range
 		)
 		SELECT instance_course_id, grade_range, final_preference, no_of_allocations
 		FROM chart_data
 		ORDER BY instance_course_id ASC, grade_range ASC, final_preference ASC`,
 		[instanceId]
-	);
+		)
+	]);
 
 	const colorPalette = [
 		'rgba(210, 214, 222, 1)',
@@ -296,7 +308,7 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId) {
 		rangeMap.get(row.grade_range)[Number(row.final_preference)] = Number(row.no_of_allocations) || 0;
 	}
 
-	return detailsResult.rows.map((row) => {
+	const rows = detailsResult.rows.map((row) => {
 		const rangeMap = chartByCourse.get(row.instance_course_id) || new Map();
 		const chartData = Array.from(rangeMap.entries()).map(([gradeRange, preferences], index) => ({
 			label: gradeRange,
@@ -325,6 +337,16 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId) {
 			chartData
 		};
 	});
+
+	const grandTotalAllocations = rows.reduce(
+		(sum, row) => sum + (Number(row.total_allocations) || 0),
+		0
+	);
+
+	return {
+		rows,
+		grandTotalAllocations
+	};
 }
 
 async function resetAllocationsByInstance(instanceId) {

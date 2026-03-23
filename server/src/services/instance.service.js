@@ -203,7 +203,7 @@ async function getPreferenceStatistics(instanceId) {
 	return instanceModel.getPreferenceStatisticsByInstance(numericId);
 }
 
-async function getPreferenceStatisticsDetails(instanceId) {
+async function getPreferenceStatisticsDetails(instanceId, options = {}) {
 	const numericId = Number(instanceId);
 	if (!Number.isInteger(numericId) || numericId <= 0) {
 		const error = new Error('Invalid instance id');
@@ -218,7 +218,7 @@ async function getPreferenceStatisticsDetails(instanceId) {
 		throw error;
 	}
 
-	return instanceModel.getPreferenceStatisticsDetailsByInstance(numericId);
+	return instanceModel.getPreferenceStatisticsDetailsByInstance(numericId, options);
 }
 
 async function resetAllocations(instanceId) {
