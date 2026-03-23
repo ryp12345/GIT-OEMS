@@ -89,3 +89,17 @@ export function allocateByStep(instanceId, token) {
 		headers: tokenHeaders(token)
 	});
 }
+
+export function getPreferenceFormStatus(instanceId, token) {
+	return api.get(`/instances/${instanceId}/preference-form-status`, {
+		headers: tokenHeaders(token)
+	});
+}
+
+export function setPreferenceFormStatus(instanceId, enabled, token) {
+	return api.post(
+		`/instances/${instanceId}/preference-form-status`,
+		{ enabled },
+		{ headers: tokenHeaders(token) }
+	);
+}

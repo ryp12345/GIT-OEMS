@@ -3,13 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
 import Notification from '../../components/common/Notification';
-import { getInstances, getPreferenceStatistics } from '../../api/instance.api';
+import { getInstances, getPreferenceStatistics, setPreferenceFormStatus } from '../../api/instance.api';
 import { getCourses } from '../../api/course.api';
 import { getStudents } from '../../api/student.api';
 
 export default function AdminDashboard() {
 	const token = localStorage.getItem('token');
 	const navigate = useNavigate();
+
+	function isFormEnabled(value) {
+		if (value === true || value === 1) return true;
+		if (typeof value === 'string') {
+			const normalized = value.trim().toLowerCase();
+			return normalized === '1' || normalized === 'true' || normalized === 't' || normalized === 'enabled';
+		}
+		return false;
+	}
 
 	const [instances, setInstances] = useState([]);
 	const [courses, setCourses] = useState([]);
@@ -49,6 +58,10 @@ export default function AdminDashboard() {
 				: Array.isArray(instancesRes?.data)
 					? instancesRes.data
 					: [];
+			const normalizedInstances = instancesData.map((instance) => ({
+				...instance,
+				form_enabled: isFormEnabled(instance.form_enabled)
+			}));
 			const coursesData = Array.isArray(coursesRes?.data?.data)
 				? coursesRes.data.data
 				: Array.isArray(coursesRes?.data)
@@ -60,12 +73,12 @@ export default function AdminDashboard() {
 					? studentsRes.data
 					: [];
 
-			setInstances(instancesData);
+			setInstances(normalizedInstances);
 			setCourses(coursesData);
 			setStudents(studentsData);
 
 			const perInstanceStats = {};
-			for (const instance of instancesData) {
+			for (const instance of normalizedInstances) {
 				try {
 					const statsRes = await getPreferenceStatistics(instance.id, token);
 					const statsArray = Array.isArray(statsRes?.data?.data)
@@ -140,8 +153,8 @@ export default function AdminDashboard() {
 		setSelectedInstanceForForm(instanceId);
 		if (instanceId) {
 			const instance = instances.find((row) => String(row.id) === String(instanceId));
-			const current = Number(instance?.preference_form_enabled || 0);
-			setFormEnabledStatus(String(current));
+		const current = instance?.form_enabled ? '1' : '0';
+		setFormEnabledStatus(current);
 		}
 	}
 
@@ -162,7 +175,8 @@ export default function AdminDashboard() {
 			setIsUpdating(true);
 			setError('');
 
-			showNotification('Preference form status updated locally. Connect update API to persist.', 'success');
+			await setPreferenceFormStatus(selectedInstanceForForm, formEnabledStatus === '1', token);
+			showNotification('Preference form status updated successfully.', 'success');
 			closePreferenceFormModal();
 			await loadDashboardData();
 		} catch (requestError) {
@@ -186,7 +200,7 @@ export default function AdminDashboard() {
 	}
 
 	const enabledPreferenceForms = useMemo(
-		() => instances.filter((instance) => Number(instance.preference_form_enabled) === 1).length,
+		() => instances.filter((instance) => Boolean(instance.form_enabled)).length,
 		[instances]
 	);
 
@@ -358,7 +372,7 @@ export default function AdminDashboard() {
 														<div className="flex items-center justify-between">
 															<span className="text-slate-600">Form</span>
 															<span className="font-semibold text-slate-800">
-																{Number(instance.preference_form_enabled || 0) === 1 ? 'Enabled' : 'Disabled'}
+																{instance.form_enabled ? 'Enabled' : 'Disabled'}
 															</span>
 														</div>
 														<div className="flex items-center justify-between">

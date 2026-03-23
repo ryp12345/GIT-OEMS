@@ -2,7 +2,7 @@ const pool = require('../config/db');
 
 async function listInstances() {
 	const result = await pool.query(
-		`SELECT id, instancename, semester, academic_year, status
+		`SELECT id, instancename, semester, academic_year, status, form_enabled
 		 FROM public.instances
 		 ORDER BY academic_year DESC, semester ASC, instancename ASC`
 	);
@@ -12,7 +12,7 @@ async function listInstances() {
 
 async function getInstanceById(id) {
 	const result = await pool.query(
-		`SELECT id, instancename, semester, academic_year, status
+		`SELECT id, instancename, semester, academic_year, status, form_enabled
 		 FROM public.instances
 		 WHERE id = $1`,
 		[id]
@@ -158,6 +158,22 @@ async function updateInstance(id, { instancename, semester, academic_year, statu
 async function deleteInstance(id) {
 	const result = await pool.query('DELETE FROM public.instances WHERE id = $1 RETURNING id', [id]);
 	return result.rowCount > 0;
+}
+
+async function getPreferenceFormStatusById(id) {
+	const result = await pool.query(
+		'SELECT form_enabled FROM public.instances WHERE id = $1',
+		[id]
+	);
+	return result.rows[0] || null;
+}
+
+async function setPreferenceFormStatusById(id, enabled) {
+	const result = await pool.query(
+		'UPDATE public.instances SET form_enabled = $2 WHERE id = $1 RETURNING id, form_enabled',
+		[id, enabled]
+	);
+	return result.rows[0] || null;
 }
 
 async function getPreferenceStatisticsByInstance(instanceId) {
@@ -781,6 +797,8 @@ module.exports = {
 	createInstance,
 	updateInstance,
 	deleteInstance,
+	getPreferenceFormStatusById,
+	setPreferenceFormStatusById,
 	getPreferenceStatisticsByInstance,
 	getPreferenceStatisticsDetailsByInstance,
 	resetAllocationsByInstance

@@ -307,6 +307,47 @@ async function allocate(instanceId) {
 	return instanceModel.allocateByInstance(numericId);
 }
 
+async function getPreferenceFormStatus(instanceId) {
+	const numericId = ensureValidInstanceId(instanceId);
+	await ensureInstanceExists(numericId);
+	const row = await instanceModel.getPreferenceFormStatusById(numericId);
+	return { enabled: row ? Boolean(row.form_enabled) : false };
+}
+
+async function setPreferenceFormStatus(instanceId, payload = {}) {
+	const numericId = ensureValidInstanceId(instanceId);
+	await ensureInstanceExists(numericId);
+	const enabled = parseEnabledFlag(payload.enabled);
+	const updated = await instanceModel.setPreferenceFormStatusById(numericId, enabled);
+	if (!updated) {
+		const error = new Error('Instance not found');
+		error.statusCode = 404;
+		throw error;
+	}
+	return { enabled: Boolean(updated.form_enabled) };
+}
+
+function parseEnabledFlag(value) {
+	if (typeof value === 'boolean') {
+		return value;
+	}
+
+	if (typeof value === 'number') {
+		if (value === 1) return true;
+		if (value === 0) return false;
+	}
+
+	if (typeof value === 'string') {
+		const normalized = value.trim().toLowerCase();
+		if (normalized === '1' || normalized === 'true' || normalized === 'enabled') return true;
+		if (normalized === '0' || normalized === 'false' || normalized === 'disabled') return false;
+	}
+
+	const error = new Error('enabled must be a boolean (true/false or 1/0)');
+	error.statusCode = 400;
+	throw error;
+}
+
 module.exports = {
 	getInstances,
 	getInstanceView,
@@ -322,5 +363,7 @@ module.exports = {
 	setFinalPreferences,
 	rejectUnderSubscribedCourses,
 	upgradePreferences,
-	allocate
+	allocate,
+	getPreferenceFormStatus,
+	setPreferenceFormStatus
 };

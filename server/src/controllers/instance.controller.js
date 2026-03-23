@@ -129,3 +129,21 @@ exports.allocate = async (req, res, next) => {
 		next(error);
 	}
 };
+
+exports.getPreferenceFormStatus = async (req, res, next) => {
+	try {
+		const data = await instanceService.getPreferenceFormStatus(req.params.id);
+		res.json(data);
+	} catch (error) {
+		next(error);
+	}
+};
+
+exports.setPreferenceFormStatus = async (req, res, next) => {
+	try {
+		const data = await instanceService.setPreferenceFormStatus(req.params.id, req.body);
+		res.json(data);
+	} catch (error) {
+		next(error);
+	}
+};

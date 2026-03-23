@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import AuthProvider from './context/AuthContext';
 import Login from './pages/auth/Login';
+import ChangePassword from './pages/auth/ChangePassword';
 import CoursesPage from './pages/admin/Courses';
 import AdminDashboard from './pages/admin/Dashboard';
 import ElectiveInstancePage from './pages/admin/ElectiveInstance';
@@ -18,6 +19,7 @@ export default function App(){
 			<BrowserRouter>
 				<Routes>
 					<Route path="/login" element={<Login/>} />
+					<Route path="/change-password" element={<ChangePassword />} />
 					<Route path="/dashboard" element={<AdminDashboard />} />
 					<Route path="/courses" element={<CoursesPage />} />
 					<Route path="/elective-instance" element={<ElectiveInstancePage />} />
