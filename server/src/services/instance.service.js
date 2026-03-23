@@ -311,7 +311,7 @@ async function getPreferenceFormStatus(instanceId) {
 	const numericId = ensureValidInstanceId(instanceId);
 	await ensureInstanceExists(numericId);
 	const row = await instanceModel.getPreferenceFormStatusById(numericId);
-	return { enabled: row ? Boolean(row.form_enabled) : false };
+	return { enabled: row ? String(row.status || '').toLowerCase() === 'active' : false };
 }
 
 async function setPreferenceFormStatus(instanceId, payload = {}) {
@@ -324,7 +324,7 @@ async function setPreferenceFormStatus(instanceId, payload = {}) {
 		error.statusCode = 404;
 		throw error;
 	}
-	return { enabled: Boolean(updated.form_enabled) };
+	return { enabled: String(updated.status || '').toLowerCase() === 'active' };
 }
 
 function parseEnabledFlag(value) {

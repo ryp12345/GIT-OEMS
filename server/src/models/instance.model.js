@@ -2,7 +2,7 @@ const pool = require('../config/db');
 
 async function listInstances() {
 	const result = await pool.query(
-		`SELECT id, instancename, semester, academic_year, status, form_enabled
+		`SELECT id, instancename, semester, academic_year, status
 		 FROM public.instances
 		 ORDER BY academic_year DESC, semester ASC, instancename ASC`
 	);
@@ -12,7 +12,7 @@ async function listInstances() {
 
 async function getInstanceById(id) {
 	const result = await pool.query(
-		`SELECT id, instancename, semester, academic_year, status, form_enabled
+		`SELECT id, instancename, semester, academic_year, status
 		 FROM public.instances
 		 WHERE id = $1`,
 		[id]
@@ -32,26 +32,28 @@ async function listDepartments() {
 }
 
 async function listInstanceCourses(instanceId) {
-	// Only return courses that are explicitly mapped for the instance (via instance_courses)
+	// Return all courses for the instance semester and merge existing mapping if present.
 	const result = await pool.query(
 		`SELECT c.coursecode,
 			c.coursename,
 			c.department_id,
 			d.shortname,
 			ic.id AS instance_course_id,
-			ic.division,
-			ic.min_intake,
-			ic.max_intake,
+			COALESCE(ic.division, 0) AS division,
+			COALESCE(ic.min_intake, 0) AS min_intake,
+			COALESCE(ic.max_intake, 0) AS max_intake,
 			COALESCE(
 				ARRAY_REMOVE(ARRAY_AGG(pb.department_id ORDER BY pb.department_id), NULL),
 				'{}'
 			) AS department_ids
-		FROM public.instance_courses ic
-		JOIN public.instances i ON i.id = ic.instance_id
-		JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
+		FROM public.instances i
+		JOIN public.courses c ON CAST(c.semester AS INTEGER) = i.semester
+		LEFT JOIN public.instance_courses ic
+			ON ic.instance_id = i.id
+			AND UPPER(ic.coursecode) = UPPER(c.coursecode)
 		LEFT JOIN public.departments d ON d.deptid = c.department_id
 		LEFT JOIN public.permitted_branches pb ON pb.instance_course_id = ic.id
-		WHERE ic.instance_id = $1
+		WHERE i.id = $1
 		GROUP BY c.coursecode, c.coursename, c.department_id, d.shortname, ic.id, ic.division, ic.min_intake, ic.max_intake
 		ORDER BY d.shortname ASC, c.coursename ASC, c.coursecode ASC`,
 		[instanceId]
@@ -162,7 +164,7 @@ async function deleteInstance(id) {
 
 async function getPreferenceFormStatusById(id) {
 	const result = await pool.query(
-		'SELECT form_enabled FROM public.instances WHERE id = $1',
+		'SELECT status FROM public.instances WHERE id = $1',
 		[id]
 	);
 	return result.rows[0] || null;
@@ -170,30 +172,46 @@ async function getPreferenceFormStatusById(id) {
 
 async function setPreferenceFormStatusById(id, enabled) {
 	const result = await pool.query(
-		'UPDATE public.instances SET form_enabled = $2 WHERE id = $1 RETURNING id, form_enabled',
-		[id, enabled]
+		'UPDATE public.instances SET status = $2 WHERE id = $1 RETURNING id, status',
+		[id, enabled ? 'Active' : 'Inactive']
 	);
 	return result.rows[0] || null;
 }
 
 async function getPreferenceStatisticsByInstance(instanceId) {
 	const result = await pool.query(
-		`SELECT 
+		`WITH eligible_students AS (
+			SELECT DISTINCT s.id, s.usn, s.department_id
+			FROM public.instances i
+			JOIN public.student_academic_records sar
+				ON CAST(sar.semester AS INTEGER) = i.semester
+			JOIN public.students s ON s.usn = sar.usn
+			WHERE i.id = $1
+			  AND EXISTS (
+				SELECT 1
+				FROM public.instance_courses ic
+				JOIN public.permitted_branches pb ON pb.instance_course_id = ic.id
+				WHERE ic.instance_id = i.id
+				  AND pb.department_id = s.department_id
+			  )
+		),
+		submitted_students AS (
+			SELECT DISTINCT es.id
+			FROM eligible_students es
+			JOIN public.preferences p ON p.usn = es.usn
+			JOIN public.instance_courses ic ON ic.id = p.instance_course_id
+			WHERE ic.instance_id = $1
+		)
+		SELECT
 			d.deptid AS id,
 			d.shortname AS department,
-			COUNT(DISTINCT s.id) AS total_students,
-			COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN s.id END) AS submitted_preferences
-		 FROM public.instances i
-		 JOIN public.student_academic_records sar ON CAST(sar.semester AS INTEGER) = i.semester
-		 JOIN public.students s ON s.usn = sar.usn
-		 JOIN public.departments d ON d.deptid = s.department_id
-		 LEFT JOIN public.preferences p ON p.usn = s.usn 
-			AND p.instance_course_id IN (
-				SELECT id FROM public.instance_courses WHERE instance_id = i.id
-			)
-		 WHERE i.id = $1
-		 GROUP BY d.deptid, d.shortname, d.name
-		 ORDER BY d.shortname ASC`,
+			COUNT(DISTINCT es.id) AS total_students,
+			COUNT(DISTINCT ss.id) AS submitted_preferences
+		FROM eligible_students es
+		JOIN public.departments d ON d.deptid = es.department_id
+		LEFT JOIN submitted_students ss ON ss.id = es.id
+		GROUP BY d.deptid, d.shortname, d.name
+		ORDER BY d.shortname ASC`,
 		[instanceId]
 	);
 

@@ -10,6 +10,7 @@ import ElectiveInstanceViewPage from './pages/admin/ElectiveInstanceView';
 import StudentsPage from './pages/admin/Students';
 import ElectivePreferencePage from './pages/admin/ElectivePreference';
 import AllocationPage from './pages/admin/Allocation';
+import Reports from './pages/admin/Reports';
 import StudentRegistrationPage from './pages/student/Registration';
 import CheckNamePage from './pages/student/CheckName';
 
@@ -26,6 +27,7 @@ export default function App(){
 					<Route path="/elective-instance/:id/view" element={<ElectiveInstanceViewPage />} />
 					<Route path="/elective-preference" element={<ElectivePreferencePage />} />
 					<Route path="/allocation" element={<AllocationPage />} />
+					<Route path="/reports" element={<Reports />} />
 					<Route path="/student/registration" element={<StudentRegistrationPage />} />
 					<Route path="/student/check" element={<CheckNamePage />} />
 					<Route path="/students" element={<StudentsPage />} />

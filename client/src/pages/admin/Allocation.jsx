@@ -23,6 +23,13 @@ export default function AllocationPage() {
 	const [rejectedCourses, setRejectedCourses] = useState([]);
 	const [rejectedCourseIds, setRejectedCourseIds] = useState([]);
 
+	function parsePreferenceDetailsPayload(payload) {
+		if (Array.isArray(payload)) {
+			return payload;
+		}
+		return Array.isArray(payload?.rows) ? payload.rows : [];
+	}
+
 	useEffect(() => {
 		(async () => {
 			try {
@@ -62,7 +69,7 @@ export default function AllocationPage() {
 			setRejectedCourses(rejected);
 
 			const detailsRes = await getPreferenceStatisticsDetails(selectedInstance, token);
-			const data = Array.isArray(detailsRes?.data) ? detailsRes.data : [];
+			const data = parsePreferenceDetailsPayload(detailsRes?.data);
 			setCourses(data);
 
 			if (rejected.length > 0) {
@@ -113,7 +120,7 @@ export default function AllocationPage() {
 			setStep('completed');
 
 			const courseRes = await getPreferenceStatisticsDetails(selectedInstance, token);
-			const courseData = Array.isArray(courseRes?.data) ? courseRes.data : [];
+			const courseData = parsePreferenceDetailsPayload(courseRes?.data);
 			setCourses(courseData);
 		} catch (err) {
 			setResultType('error');

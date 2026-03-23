@@ -15,7 +15,13 @@ export default function AdminDashboard() {
 		if (value === true || value === 1) return true;
 		if (typeof value === 'string') {
 			const normalized = value.trim().toLowerCase();
-			return normalized === '1' || normalized === 'true' || normalized === 't' || normalized === 'enabled';
+			return (
+				normalized === '1' ||
+				normalized === 'true' ||
+				normalized === 't' ||
+				normalized === 'enabled' ||
+				normalized === 'active'
+			);
 		}
 		return false;
 	}
@@ -60,7 +66,7 @@ export default function AdminDashboard() {
 					: [];
 			const normalizedInstances = instancesData.map((instance) => ({
 				...instance,
-				form_enabled: isFormEnabled(instance.form_enabled)
+				form_enabled: isFormEnabled(instance.status)
 			}));
 			const coursesData = Array.isArray(coursesRes?.data?.data)
 				? coursesRes.data.data
@@ -153,8 +159,8 @@ export default function AdminDashboard() {
 		setSelectedInstanceForForm(instanceId);
 		if (instanceId) {
 			const instance = instances.find((row) => String(row.id) === String(instanceId));
-		const current = instance?.form_enabled ? '1' : '0';
-		setFormEnabledStatus(current);
+			const current = instance?.form_enabled ? '1' : '0';
+			setFormEnabledStatus(current);
 		}
 	}
 
