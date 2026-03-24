@@ -8,7 +8,8 @@ import {
 	setFinalPreferences,
 	rejectUnderSubscribedCourses,
 	upgradePreferences,
-	allocateByStep
+	allocateByStep,
+	downloadInstanceAllocations
 } from '../../api/instance.api';
 
 export default function AllocationPage() {
@@ -21,7 +22,6 @@ export default function AllocationPage() {
 	const [resultType, setResultType] = useState('info');
 	const [resultMessage, setResultMessage] = useState('');
 	const [rejectedCourses, setRejectedCourses] = useState([]);
-	const [rejectedCourseIds, setRejectedCourseIds] = useState([]);
 
 	function parsePreferenceDetailsPayload(payload) {
 		if (Array.isArray(payload)) {
@@ -47,7 +47,6 @@ export default function AllocationPage() {
 		setStep('initial');
 		setCourses([]);
 		setRejectedCourses([]);
-		setRejectedCourseIds([]);
 		setResultMessage('');
 	}
 
@@ -61,45 +60,29 @@ export default function AllocationPage() {
 			const rejectRes = await rejectUnderSubscribedCourses(selectedInstance, token);
 			const rejected = Array.isArray(rejectRes?.data?.rejectedCourses) ? rejectRes.data.rejectedCourses : [];
 
-			setRejectedCourseIds(
-				rejected
-					.map((course) => Number(course.instance_course_id))
-					.filter((value) => Number.isInteger(value) && value > 0)
-			);
+			const ids = rejected
+				.map((course) => Number(course.instance_course_id))
+				.filter((value) => Number.isInteger(value) && value > 0);
+
 			setRejectedCourses(rejected);
+
+			if (rejected.length > 0) {
+				const rejectedNames = rejected.map((c) => c.coursecode).join(', ');
+				await upgradePreferences(selectedInstance, ids, token);
+				setResultType('success');
+				setResultMessage(`Rejected ${rejectedNames}. Preferences are Upgraded Successfully.`);
+			} else {
+				setResultType('info');
+				setResultMessage('No courses were rejected. Ready to allocate.');
+			}
 
 			const detailsRes = await getPreferenceStatisticsDetails(selectedInstance, token);
 			const data = parsePreferenceDetailsPayload(detailsRes?.data);
 			setCourses(data);
-
-			if (rejected.length > 0) {
-				const rejectedNames = rejected.map((c) => c.coursecode).join(', ');
-				setResultType('warning');
-				setResultMessage(`Rejected ${rejectedNames}. Upgrading the students preferences.`);
-				setStep('upgrading');
-			} else {
-				setResultType('info');
-				setResultMessage('No courses were rejected. Ready to allocate.');
-				setStep('allocating');
-			}
-		} catch (err) {
-			setResultType('error');
-			setResultMessage(err?.response?.data?.error || 'Failed to analyze');
-		} finally {
-			setLoading(false);
-		}
-	}
-
-	async function handleUpgradePreferences() {
-		setLoading(true);
-		try {
-			await upgradePreferences(selectedInstance, rejectedCourseIds, token);
-			setResultType('success');
-			setResultMessage('Preferences are upgraded successfully.');
 			setStep('allocating');
 		} catch (err) {
 			setResultType('error');
-			setResultMessage(err?.message || 'Failed to upgrade preferences');
+			setResultMessage(err?.response?.data?.error || 'Failed to analyze');
 		} finally {
 			setLoading(false);
 		}
@@ -130,6 +113,24 @@ export default function AllocationPage() {
 		}
 	}
 
+	async function handleDownload() {
+		if (!selectedInstance || selectedInstance === '#') return;
+		try {
+			const res = await downloadInstanceAllocations(selectedInstance, token);
+			const url = window.URL.createObjectURL(new Blob([res.data], { type: res.headers['content-type'] }));
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `student_allocations_${selectedInstance}.xlsx`;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			window.URL.revokeObjectURL(url);
+		} catch (err) {
+			setResultType('error');
+			setResultMessage(err?.response?.data?.error || 'Download failed');
+		}
+	}
+
 	async function handleReset() {
 		if (!selectedInstance || selectedInstance === '#') return;
 
@@ -141,7 +142,6 @@ export default function AllocationPage() {
 			await resetInstanceAllocations(selectedInstance, token);
 			setStep('initial');
 			setRejectedCourses([]);
-			setRejectedCourseIds([]);
 			setCourses([]);
 			setResultMessage('');
 		} catch (err) {
@@ -200,16 +200,6 @@ export default function AllocationPage() {
 									</button>
 								)}
 
-								{step === 'upgrading' && (
-									<button
-										onClick={handleUpgradePreferences}
-										disabled={loading}
-										className="rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-amber-700 disabled:opacity-50"
-									>
-										{loading ? 'Upgrading...' : 'Upgrade Preferences'}
-									</button>
-								)}
-
 								{(step === 'allocating' || step === 'completed') && (
 									<button
 										onClick={handleAllocate}
@@ -217,6 +207,16 @@ export default function AllocationPage() {
 										className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 disabled:opacity-50"
 									>
 										{loading ? 'Allocating...' : 'Allocate'}
+									</button>
+								)}
+
+								{step === 'completed' && (
+									<button
+										onClick={handleDownload}
+										disabled={loading}
+										className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-emerald-700 disabled:opacity-50"
+									>
+										Download Excel
 									</button>
 								)}
 
@@ -254,24 +254,32 @@ export default function AllocationPage() {
 								<table className="min-w-full border-collapse">
 									<thead>
 										<tr className="bg-slate-50">
+												<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">#</th>
 											<th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Course</th>
 											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">P1 Count</th>
 											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">P1 Min Grade</th>
 											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">P1 Median Grade</th>
 											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">P1 Max Grade</th>
 											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">P2 Count</th>
+											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">P2 Min Grade</th>
+											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">P2 Median Grade</th>
+											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">P2 Max Grade</th>
+												<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Division</th>
+												<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Min Intake</th>
+												<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Max Intake</th>
+												<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Total Allocations</th>
 											<th className="px-4 py-3 text-center text-sm font-semibold text-slate-700">Status</th>
 										</tr>
 									</thead>
 									<tbody>
 										{courses.length === 0 ? (
 											<tr>
-												<td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
+													<td colSpan={15} className="px-4 py-8 text-center text-sm text-slate-500">
 													No data. Select an instance and click Start.
 												</td>
 											</tr>
 										) : (
-											courses.map((course) => (
+												courses.map((course, index) => (
 												<tr
 													key={course.instance_course_id}
 													className={
@@ -280,6 +288,7 @@ export default function AllocationPage() {
 															: 'odd:bg-white even:bg-slate-50/50'
 													}
 												>
+														<td className="px-4 py-3 text-center text-sm text-slate-700">{index + 1}</td>
 													<td className="px-4 py-3 text-sm text-slate-700">
 														{course.coursename} ({course.coursecode})
 													</td>
@@ -288,6 +297,13 @@ export default function AllocationPage() {
 													<td className="px-4 py-3 text-center text-sm text-slate-600">{course.p1_median_grade ?? '-'}</td>
 													<td className="px-4 py-3 text-center text-sm text-slate-600">{course.p1_max_grade ?? '-'}</td>
 													<td className="px-4 py-3 text-center text-sm font-semibold text-blue-700">{course.p2_count}</td>
+													<td className="px-4 py-3 text-center text-sm text-slate-600">{course.p2_min_grade ?? '-'}</td>
+													<td className="px-4 py-3 text-center text-sm text-slate-600">{course.p2_median_grade ?? '-'}</td>
+													<td className="px-4 py-3 text-center text-sm text-slate-600">{course.p2_max_grade ?? '-'}</td>
+														<td className="px-4 py-3 text-center text-sm text-slate-700">{course.division ?? '-'}</td>
+														<td className="px-4 py-3 text-center text-sm text-slate-700">{course.min_intake ?? '-'}</td>
+														<td className="px-4 py-3 text-center text-sm text-slate-700">{course.max_intake ?? '-'}</td>
+														<td className="px-4 py-3 text-center text-sm font-semibold text-slate-900">{course.total_allocations ?? 0}</td>
 													<td className="px-4 py-3 text-center text-sm text-slate-700">{course.allocation_status || 'Pending'}</td>
 												</tr>
 											))

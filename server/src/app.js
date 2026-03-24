@@ -7,6 +7,7 @@ const courseRoutes = require('./routes/course.routes');
 const instanceRoutes = require('./routes/instance.routes');
 const studentRoutes = require('./routes/student.routes');
 const preferencesRoutes = require('./routes/preferences.routes');
+const allocationRoutes = require('./routes/allocation.routes');
 const errorMiddleware = require('./middlewares/error.middleware');
 
 app.use(express.json());
@@ -67,6 +68,7 @@ app.use('/api/courses', courseRoutes);
 app.use('/api/instances', instanceRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/preferences', preferencesRoutes);
+app.use('/api/allocations', allocationRoutes);
 
 app.use(errorMiddleware);
 

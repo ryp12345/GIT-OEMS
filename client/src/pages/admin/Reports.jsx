@@ -5,7 +5,8 @@ import Notification from '../../components/common/Notification';
 import { 
 	getInstances, 
 	getPreferenceStatisticsDetails,
-	getPreferenceStatistics 
+	getPreferenceStatistics,
+	downloadInstanceAllocations
 } from '../../api/instance.api';
 import { getCourses } from '../../api/course.api';
 import { getStudents } from '../../api/student.api';
@@ -103,6 +104,23 @@ export default function Reports() {
 		setNotification({ show: true, message, type });
 	}
 
+	async function handleDownload() {
+		if (!selectedInstanceId) return;
+		try {
+			const res = await downloadInstanceAllocations(selectedInstanceId, token);
+			const url = window.URL.createObjectURL(new Blob([res.data], { type: res.headers['content-type'] }));
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `student_allocations_${selectedInstanceId}.xlsx`;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			window.URL.revokeObjectURL(url);
+		} catch (err) {
+			showNotification(err?.response?.data?.error || 'Download failed', 'error');
+		}
+	}
+
 	const summaryStats = useMemo(() => {
 		if (!reportData?.statistics) return { submitted: 0, pending: 0, total: 0 };
 
@@ -152,7 +170,8 @@ export default function Reports() {
 						) : (
 							<>
 								<div className="bg-white rounded-xl shadow-lg p-6">
-									<div className="mb-6">
+<div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end">
+									<div className="flex-1">
 										<label className="block text-sm font-medium text-slate-700 mb-2">
 											Select Elective Instance
 										</label>
@@ -168,6 +187,15 @@ export default function Reports() {
 												</option>
 											))}
 										</select>
+									</div>
+									{selectedInstanceId && (
+										<button
+											onClick={handleDownload}
+											className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700"
+										>
+											Download Excel
+										</button>
+									)}
 									</div>
 
 									{selectedInstanceId && (

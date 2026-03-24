@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Chart from 'chart.js/auto';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
 import Notification from '../../components/common/Notification';
 import {
-	getInstances,
-	getPreferenceStatisticsDetails,
-  resetInstanceAllocations
+  getInstances,
+  getPreferenceStatisticsDetails,
+  resetInstanceAllocations,
+  downloadInstanceAllocations
 } from '../../api/instance.api';
 
 function formatGrade(value) {
@@ -25,23 +27,64 @@ function StatisticsChartModal({ row, onClose }) {
   useEffect(() => {
     if (!row || !canvasRef.current) return undefined;
 
-    const labels = ['Final Preference 1', 'Final Preference 2', 'Final Preference 3', 'Final Preference 4', 'Final Preference 5'];
+    // Dynamic labels from row.chartLabels or fallback to 1-9
+    const labels = Array.isArray(row.chartLabels) && row.chartLabels.length > 0
+      ? row.chartLabels
+      : Array.from({ length: 9 }, (_, i) => `Final Preference ${i + 1}`);
+
+    // Dynamic color palette
     const fallbackColors = [
       'rgba(59, 130, 246, 0.85)',
       'rgba(16, 185, 129, 0.85)',
       'rgba(245, 158, 11, 0.85)',
       'rgba(239, 68, 68, 0.85)',
-      'rgba(99, 102, 241, 0.85)'
+      'rgba(99, 102, 241, 0.85)',
+      'rgba(210, 214, 222, 0.85)',
+      'rgba(0, 166, 90, 0.85)',
+      'rgba(221, 75, 57, 0.85)',
+      'rgba(255, 193, 7, 0.85)'
     ];
 
+    // Datasets: each grade range is a series
     const datasets = (Array.isArray(row.chartData) ? row.chartData : []).map((series, index) => ({
       label: series.label || `Grade Range ${index + 1}`,
-      data: Array.isArray(series.data) ? series.data.map((n) => Number(n || 0)) : [0, 0, 0, 0, 0],
+      data: Array.isArray(series.data) ? series.data.map((n) => Number(n || 0)) : Array(labels.length).fill(0),
       backgroundColor: series.backgroundColor || fallbackColors[index % fallbackColors.length],
       borderRadius: 8,
       borderSkipped: false,
       maxBarThickness: 34
     }));
+
+    // Plugin to show stack totals above bars (match PHP: radius 18, border 3, font 14px)
+    const showStackTotals = {
+      id: 'showStackTotals',
+      afterDatasetsDraw(chart) {
+        const { ctx, data, scales: { x, y } } = chart;
+        data.labels.forEach((label, i) => {
+          let sum = 0;
+          data.datasets.forEach(ds => {
+            sum += ds.data[i] || 0;
+          });
+          const xPos = x.getPixelForValue(i);
+          const yPos = y.getPixelForValue(sum) - 18;
+          const radius = 18;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(xPos, yPos, radius, 0, 2 * Math.PI, false);
+          ctx.fillStyle = '#fff';
+          ctx.fill();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#FF4D00';
+          ctx.stroke();
+          ctx.font = 'bold 14px Arial';
+          ctx.fillStyle = '#FF4D00';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(sum, xPos, yPos);
+          ctx.restore();
+        });
+      }
+    };
 
     if (chartRef.current) {
       chartRef.current.destroy();
@@ -75,19 +118,49 @@ function StatisticsChartModal({ row, onClose }) {
             bodyColor: '#e2e8f0',
             padding: 12,
             cornerRadius: 10
+          },
+          datalabels: {
+            display: function(context) {
+              // Only show label if value is not zero
+              return context.dataset.data[context.dataIndex] !== 0;
+            },
+            anchor: 'center',
+            align: 'center',
+            color: '#000',
+            font: {
+              weight: 'bold'
+            }
           }
         },
         scales: {
           x: {
+            stacked: true,
             grid: {
               display: false
+            },
+            title: {
+              display: true,
+              text: 'Preferences',
+              font: {
+                size: 16,
+                weight: 'bold'
+              }
             },
             ticks: {
               color: '#475569'
             }
           },
           y: {
+            stacked: true,
             beginAtZero: true,
+            title: {
+              display: true,
+              text: 'Number of Students',
+              font: {
+                size: 16,
+                weight: 'bold'
+              }
+            },
             ticks: {
               precision: 0,
               color: '#475569'
@@ -98,7 +171,8 @@ function StatisticsChartModal({ row, onClose }) {
             }
           }
         }
-      }
+      },
+      plugins: [ChartDataLabels, showStackTotals]
     });
 
     return () => {
@@ -177,16 +251,29 @@ export default function ElectivePreferencePage() {
   const [activeChartRow, setActiveChartRow] = useState(null);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
 
-  function applyPreferenceDetailsResponse(payload) {
-    if (Array.isArray(payload)) {
-      setRows(payload);
-      setGrandTotalAllocations(payload.reduce((sum, row) => sum + Number(row.total_allocations || 0), 0));
-      return;
-    }
+  // Find all unique preferences in the data for dynamic columns
+  function getAllPreferences(rows) {
+    const prefs = new Set();
+    rows.forEach(row => {
+      if (Array.isArray(row.preferences)) {
+        row.preferences.forEach(p => prefs.add(p.prefIndex));
+      } else {
+        // fallback for old API shape
+        [1,2].forEach(i => prefs.add(i));
+      }
+    });
+    return Array.from(prefs).sort((a, b) => a - b);
+  }
 
-    const nextRows = Array.isArray(payload?.rows) ? payload.rows : [];
+  function applyPreferenceDetailsResponse(payload) {
+    let nextRows = [];
+    if (Array.isArray(payload)) {
+      nextRows = payload;
+    } else if (Array.isArray(payload?.rows)) {
+      nextRows = payload.rows;
+    }
     setRows(nextRows);
-    setGrandTotalAllocations(Number(payload?.grandTotalAllocations) || 0);
+    setGrandTotalAllocations(nextRows.reduce((sum, row) => sum + Number(row.total_allocations || 0), 0));
   }
 
   useEffect(() => {
@@ -253,66 +340,30 @@ export default function ElectivePreferencePage() {
     }
   }
 
-  function downloadCsv() {
-    if (!rows || rows.length === 0) {
-      showNotification('No data to download', 'error');
+  async function downloadExcel() {
+    if (!selectedInstance || selectedInstance === '#') {
+      showNotification('Please select an instance', 'error');
       return;
     }
-
-    const csvRows = [[
-      'Sl.No',
-      'Course Name',
-      'P1 Count',
-      'P1 Min',
-      'P1 Median',
-      'P1 Max',
-      'P2 Count',
-      'P2 Min',
-      'P2 Median',
-      'P2 Max',
-      'Division',
-      'Min Intake',
-      'Max Intake',
-      'Allocations',
-      'Status'
-    ]];
-
-    rows.forEach((row, index) => {
-      csvRows.push([
-        index + 1,
-        `${row.coursename} (${row.coursecode})`,
-        row.p1_count,
-        formatGrade(row.p1_min_grade),
-        formatGrade(row.p1_median_grade),
-        formatGrade(row.p1_max_grade),
-        row.p2_count,
-        formatGrade(row.p2_min_grade),
-        formatGrade(row.p2_median_grade),
-        formatGrade(row.p2_max_grade),
-        row.division,
-        row.min_intake,
-        row.max_intake,
-        row.total_allocations,
-        row.allocation_status
-      ]);
-    });
-
-    const grandTotal = rows.reduce((sum, row) => sum + Number(row.total_allocations || 0), 0);
-    csvRows.push(['', 'Grand Total Allocations', '', '', '', '', '', '', '', '', '', '', '', grandTotal, '']);
-
-    const csv = csvRows.map((csvRow) => csvRow.map(toCsvCell).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `elective_preferences_instance_${selectedInstance}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
+    try {
+      const res = await downloadInstanceAllocations(selectedInstance, token);
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: res.headers['content-type'] }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `student_allocations_${selectedInstance}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      showNotification('Excel downloaded successfully.', 'success');
+    } catch (err) {
+      showNotification('Failed to download Excel.', 'error');
+    }
   }
 
   const hasSelectedInstance = selectedInstance && selectedInstance !== '#';
+  // Dynamic preferences for table columns
+  const allPreferences = useMemo(() => getAllPreferences(rows), [rows]);
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -361,7 +412,7 @@ export default function ElectivePreferencePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={downloadCsv}
+                  onClick={downloadExcel}
                   disabled={selectedInstance === '#'}
                   className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-emerald-700 disabled:opacity-50"
                 >
@@ -379,7 +430,7 @@ export default function ElectivePreferencePage() {
                     <tr className="bg-blue-600 text-white">
                       <th className="border px-4 py-3 text-left text-xs uppercase" rowSpan={2}>Sl.No</th>
                       <th className="border px-4 py-3 text-left text-xs uppercase" rowSpan={2}>Course Name</th>
-                      <th className="border px-4 py-3 text-center text-xs uppercase" colSpan={8}>Preferences</th>
+                      <th className="border px-4 py-3 text-center text-xs uppercase" colSpan={allPreferences.length * 4}>Preferences</th>
                       <th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Div</th>
                       <th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Min</th>
                       <th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Max</th>
@@ -388,26 +439,24 @@ export default function ElectivePreferencePage() {
                       <th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Stats</th>
                     </tr>
                     <tr className="bg-blue-600 text-white">
-                      <th className="border px-3 py-2 text-center text-xs font-semibold">1</th>
-                      <th className="border px-3 py-2 text-center text-xs">Min</th>
-                      <th className="border px-3 py-2 text-center text-xs">Median</th>
-                      <th className="border px-3 py-2 text-center text-xs">Max</th>
-                      <th className="border px-3 py-2 text-center text-xs font-semibold">2</th>
-                      <th className="border px-3 py-2 text-center text-xs">Min</th>
-                      <th className="border px-3 py-2 text-center text-xs">Median</th>
-                      <th className="border px-3 py-2 text-center text-xs">Max</th>
+                      {allPreferences.map((pref) => [
+                        <th key={`p${pref}_count`} className="border px-3 py-2 text-center text-xs font-semibold">{pref}</th>,
+                        <th key={`p${pref}_min`} className="border px-3 py-2 text-center text-xs">Min</th>,
+                        <th key={`p${pref}_median`} className="border px-3 py-2 text-center text-xs">Median</th>,
+                        <th key={`p${pref}_max`} className="border px-3 py-2 text-center text-xs">Max</th>
+                      ])}
                     </tr>
                   </thead>
                   <tbody>
                     {isLoading ? (
                       <tr>
-                        <td colSpan={16} className="px-6 py-12 text-center text-gray-500">Loading...</td>
+                        <td colSpan={allPreferences.length * 4 + 7} className="px-6 py-12 text-center text-gray-500">Loading...</td>
                       </tr>
                     ) : rows.length === 0 && !hasSelectedInstance ? (
                       <tr>
-                      <td colSpan={16} className="px-6 py-12 text-center text-gray-500">
-                      Please select an instance to view preferences.
-                      </td>
+                        <td colSpan={allPreferences.length * 4 + 7} className="px-6 py-12 text-center text-gray-500">
+                          Please select an instance to view preferences.
+                        </td>
                       </tr>
                     ) : (
                       rows.map((row, index) => {
@@ -418,18 +467,27 @@ export default function ElectivePreferencePage() {
                             ? 'bg-emerald-100'
                             : 'bg-gray-100';
 
+                        // Map preferences for this row by index
+                        const prefMap = {};
+                        if (Array.isArray(row.preferences)) {
+                          row.preferences.forEach(p => {
+                            prefMap[p.prefIndex] = p;
+                          });
+                        }
+
                         return (
                           <tr key={`${row.coursecode}-${index}`} className={`${statusRowClass} border-b border-gray-200`}>
                             <td className="border px-3 py-2 text-sm">{index + 1}</td>
                             <td className="border px-3 py-2 text-sm">{row.coursename} ({row.coursecode})</td>
-                            <td className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{row.p1_count}</td>
-                            <td className="border px-3 py-2 text-center text-sm">{formatGrade(row.p1_min_grade)}</td>
-                            <td className="border px-3 py-2 text-center text-sm">{formatGrade(row.p1_median_grade)}</td>
-                            <td className="border px-3 py-2 text-center text-sm">{formatGrade(row.p1_max_grade)}</td>
-                            <td className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{row.p2_count}</td>
-                            <td className="border px-3 py-2 text-center text-sm">{formatGrade(row.p2_min_grade)}</td>
-                            <td className="border px-3 py-2 text-center text-sm">{formatGrade(row.p2_median_grade)}</td>
-                            <td className="border px-3 py-2 text-center text-sm">{formatGrade(row.p2_max_grade)}</td>
+                            {allPreferences.map((pref) => {
+                              const p = prefMap[pref] || {};
+                              return [
+                                <td key={`p${pref}_count`} className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{p.count ?? ''}</td>,
+                                <td key={`p${pref}_min`} className="border px-3 py-2 text-center text-sm">{formatGrade(p.min_grade)}</td>,
+                                <td key={`p${pref}_median`} className="border px-3 py-2 text-center text-sm">{formatGrade(p.median_grade)}</td>,
+                                <td key={`p${pref}_max`} className="border px-3 py-2 text-center text-sm">{formatGrade(p.max_grade)}</td>
+                              ];
+                            })}
                             <td className="border px-3 py-2 text-center text-sm">{row.division}</td>
                             <td className="border px-3 py-2 text-center text-sm">{row.min_intake}</td>
                             <td className="border px-3 py-2 text-center text-sm">{row.max_intake}</td>
@@ -457,7 +515,7 @@ export default function ElectivePreferencePage() {
 
                     {hasSelectedInstance && !isLoading ? (
                       <tr className="bg-gray-200">
-                        <td colSpan={13} className="border px-3 py-2 text-sm font-bold">Grand Total Allocations</td>
+                        <td colSpan={allPreferences.length * 4 + 3} className="border px-3 py-2 text-sm font-bold">Grand Total Allocations</td>
                         <td className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{grandTotalAllocations}</td>
                         <td className="border px-3 py-2" />
                         <td className="border px-3 py-2" />

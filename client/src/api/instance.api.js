@@ -103,3 +103,11 @@ export function setPreferenceFormStatus(instanceId, enabled, token) {
 		{ headers: tokenHeaders(token) }
 	);
 }
+
+// Download allocations Excel for an instance
+export function downloadInstanceAllocations(instanceId, token) {
+	return api.get(`/allocations/${instanceId}/download`, {
+		headers: tokenHeaders(token),
+		responseType: 'blob'
+	});
+}

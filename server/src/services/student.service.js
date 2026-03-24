@@ -329,9 +329,10 @@ async function removeStudent(id) {
 }
 
 async function checkName(payload = {}) {
-	const uid = String(payload.uid1 || payload.uid || '').trim();
+	const uid = String(payload.uid1 || payload.uid || '').trim().toUpperCase();
 	const name = String(payload.name1 || payload.name || '').trim();
-	const usn = String(payload.usn || '').trim();
+	const usn = String(payload.usn || '').trim().toUpperCase();
+	const normalizedName = name.replace(/\s+/g, ' ').trim();
 
 	if (!uid || !usn || !name) {
 		const error = new Error('uid, usn and name are required');
@@ -339,11 +340,28 @@ async function checkName(payload = {}) {
 		throw error;
 	}
 
-	// find student matching uid/usn and name containing provided text
-	const studentRes = await pool.query(
-		`SELECT id, name, uid, usn, department_id FROM public.students WHERE UPPER(uid) = UPPER($1) AND UPPER(usn) = UPPER($2) AND name ILIKE '%' || $3 || '%' LIMIT 1`,
-		[uid, usn, name]
+	// PHP uses uid + usn + partial name matching. Keep that behavior, but normalize whitespace.
+	let studentRes = await pool.query(
+		`SELECT id, name, uid, usn, department_id
+		 FROM public.students
+		 WHERE UPPER(uid) = $1
+		   AND UPPER(usn) = $2
+		   AND REGEXP_REPLACE(LOWER(TRIM(name)), '\\s+', ' ', 'g') LIKE '%' || LOWER($3) || '%'
+		 LIMIT 1`,
+		[uid, usn, normalizedName]
 	);
+
+	// Fallback: if uid+usn identify exactly one student, accept minor name-format differences.
+	if (studentRes.rowCount === 0) {
+		studentRes = await pool.query(
+			`SELECT id, name, uid, usn, department_id
+			 FROM public.students
+			 WHERE UPPER(uid) = $1
+			   AND UPPER(usn) = $2
+			 LIMIT 1`,
+			[uid, usn]
+		);
+	}
 
 	if (studentRes.rowCount === 0) {
 		const error = new Error('Student not found with the provided details');
@@ -369,13 +387,14 @@ async function checkName(payload = {}) {
 
 	const instance = instRes.rows[0];
 
-	// check if student has existing preferences (for any instance courses)
+	// check if student has existing preferences for this active instance
 	const prefsRes = await pool.query(
 		`SELECT p.preferred, p.final_preference, p.allocation_status, p.status, c.coursename, c.coursecode, p.instance_course_id
 		 FROM public.preferences p
-		 LEFT JOIN public.instance_courses ic ON ic.id = p.instance_course_id AND ic.instance_id = $1
-		 LEFT JOIN public.courses c ON c.coursecode = ic.coursecode
-		 WHERE UPPER(p.usn) = UPPER($2)`,
+		 JOIN public.instance_courses ic ON ic.id = p.instance_course_id AND ic.instance_id = $1
+		 LEFT JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
+		 WHERE UPPER(p.usn) = UPPER($2)
+		 ORDER BY p.preferred ASC, p.instance_course_id ASC`,
 		[instance.id, student.usn]
 	);
 
@@ -384,15 +403,38 @@ async function checkName(payload = {}) {
 	}
 
 	// otherwise list permitted courses for the student's department in this instance
+	// and enforce PHP-equivalent restricted/prerequisite rules based on previously allotted courses
 	const coursesRes = await pool.query(
 		`SELECT ic.id AS icid, ic.*, c.coursename, c.coursecode, eg.group_name
 		 FROM public.instance_courses ic
-		 JOIN public.courses c ON c.coursecode = ic.coursecode
+		 JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
 		 LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
 		 WHERE ic.instance_id = $1
 			 AND ic.id IN (SELECT instance_course_id FROM public.permitted_branches WHERE department_id = $2)
+			 AND (
+				 c.restricted IS NULL
+				 OR UPPER(c.restricted) NOT IN (
+					SELECT UPPER(c1.coursecode)
+					FROM public.preferences p
+					JOIN public.instance_courses ic1 ON ic1.id = p.instance_course_id
+					JOIN public.courses c1 ON UPPER(c1.coursecode) = UPPER(ic1.coursecode)
+					WHERE UPPER(p.usn) = UPPER($3)
+					  AND p.status = p.final_preference
+				 )
+			 )
+			 AND (
+				 COALESCE(c.compulsory_prereq, 'No') <> 'Yes'
+				 OR UPPER(c.pre_req) IN (
+					SELECT UPPER(c2.coursecode)
+					FROM public.preferences p2
+					JOIN public.instance_courses ic2 ON ic2.id = p2.instance_course_id
+					JOIN public.courses c2 ON UPPER(c2.coursecode) = UPPER(ic2.coursecode)
+					WHERE UPPER(p2.usn) = UPPER($3)
+					  AND p2.status = p2.final_preference
+				 )
+			 )
 		 ORDER BY eg.group_name NULLS LAST, c.coursename ASC, c.coursecode ASC`,
-		[instance.id, student.department_id]
+		[instance.id, student.department_id, student.usn]
 	);
 
 	const grouped = {};

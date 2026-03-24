@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import Notification from '../../components/common/Notification';
 import { submitPreferences } from '../../api/preferences.api';
 import { checkStudentDetails } from '../../api/student.api';
 
 export default function StudentRegistrationPage() {
+  const location = useLocation();
   const token = localStorage.getItem('token');
   const [agreed, setAgreed] = useState(false);
   const [showBasic, setShowBasic] = useState(false);
@@ -12,7 +14,44 @@ export default function StudentRegistrationPage() {
   const [courses, setCourses] = useState([]);
   const [registeredPreferences, setRegisteredPreferences] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState([]);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
+
+  useEffect(() => {
+    const state = location?.state || {};
+    if (state.usn || state.uid || state.name) {
+      setBasic((current) => ({
+        ...current,
+        usn: state.usn || current.usn,
+        uid: state.uid || current.uid,
+        name: state.name || current.name
+      }));
+      setAgreed(true);
+      setShowBasic(true);
+    }
+  }, [location]);
+
+  const groupedCourses = useMemo(() => {
+    const grouped = {};
+    courses.forEach((course) => {
+      const key = course.group_name || 'No Group';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(course);
+    });
+    return grouped;
+  }, [courses]);
+
+  const selectedPreferences = useMemo(() => {
+    return selectedOrder.map((courseId, index) => {
+      const course = courses.find((row) => String(row.icid ?? row.id) === String(courseId));
+      return {
+        instance_course_id: Number(courseId),
+        preferred: index + 1,
+        coursecode: course?.coursecode || '-',
+        coursename: course?.coursename || '-'
+      };
+    });
+  }, [courses, selectedOrder]);
 
   async function handleProceed() {
     if (!basic.usn || !basic.uid || !basic.name) {
@@ -26,14 +65,25 @@ export default function StudentRegistrationPage() {
       if (data.registered) {
         setRegisteredPreferences(data.preferences || []);
         setCourses([]);
+        setSelectedOrder([]);
       } else {
+        if (!data.instance) {
+          setRegisteredPreferences(null);
+          setCourses([]);
+          setShowCourses(false);
+          setNotification({ show: true, message: data.message || 'No active elective instance for your semester', type: 'error' });
+          return;
+        }
+
         // data.courses is an object grouped by group name
         const grouped = data.courses || {};
         const flat = [];
         Object.keys(grouped).forEach((grp) => {
           grouped[grp].forEach((c) => flat.push({ ...c, group_name: grp }));
         });
+        setRegisteredPreferences(null);
         setCourses(flat);
+        setSelectedOrder([]);
       }
       setShowBasic(false);
       setShowCourses(true);
@@ -46,7 +96,9 @@ export default function StudentRegistrationPage() {
     setSelectedOrder((prev) => {
       const copy = [...prev];
       if (checked) {
-        copy.push(courseId);
+        if (copy.indexOf(courseId) === -1) {
+          copy.push(courseId);
+        }
       } else {
         const idx = copy.indexOf(courseId);
         if (idx >= 0) copy.splice(idx, 1);
@@ -55,21 +107,31 @@ export default function StudentRegistrationPage() {
     });
   }
 
-  async function handleSubmit(e) {
+  function handleSubmit(e) {
     e.preventDefault();
     if (selectedOrder.length === 0) {
-      setNotification({ show: true, message: 'Please select at least one course', type: 'error' });
+      setNotification({ show: true, message: 'Please select courses before confirming', type: 'error' });
       return;
     }
 
-    const preferences = selectedOrder.map((courseId, index) => ({
-      instance_course_id: Number(courseId),
+    if (selectedOrder.length !== courses.length) {
+      setNotification({ show: true, message: 'Please select all listed courses to continue', type: 'error' });
+      return;
+    }
+
+    setIsConfirmOpen(true);
+  }
+
+  async function handleConfirmSubmission() {
+    const preferences = selectedPreferences.map((row) => ({
+      instance_course_id: row.instance_course_id,
       usn: basic.usn,
-      preferred: index + 1
+      preferred: row.preferred
     }));
 
     try {
       await submitPreferences({ preferences }, token);
+      setIsConfirmOpen(false);
       setNotification({ show: true, message: 'Preferences saved', type: 'success' });
     } catch (err) {
       setNotification({ show: true, message: err?.response?.data?.error || 'Failed to save', type: 'error' });
@@ -87,7 +149,7 @@ export default function StudentRegistrationPage() {
         <div className="mb-6">
           <label className="inline-flex items-center">
             <input type="checkbox" checked={agreed} onChange={(e) => { setAgreed(e.target.checked); if (e.target.checked) setShowBasic(true); }} className="mr-2" />
-            I have read the user manual.
+            I have read the user manual. I will save my preferences by clicking on confirm. I agree that I am responsible if preferences are not saved.
           </label>
         </div>
 
@@ -117,6 +179,7 @@ export default function StudentRegistrationPage() {
                   <th className="p-2">Preference</th>
                   <th className="p-2">Final Preference</th>
                   <th className="p-2">Status</th>
+                  <th className="p-2">Internal Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -127,6 +190,7 @@ export default function StudentRegistrationPage() {
                     <td className="p-2">{p.preferred}</td>
                     <td className="p-2">{p.final_preference}</td>
                     <td className="p-2">{p.allocation_status}</td>
+                    <td className="p-2">{p.status ?? '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -141,20 +205,32 @@ export default function StudentRegistrationPage() {
               <table className="min-w-full table-auto">
                 <thead>
                   <tr className="bg-gray-100 text-left">
+                    <th className="p-2">Elective Group</th>
                     <th className="p-2">Select</th>
                     <th className="p-2">Course Code</th>
                     <th className="p-2">Course Name</th>
+                    <th className="p-2">Preference No</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {courses.map((c) => (
-                    <tr key={c.id} className="border-t">
+                  {Object.keys(groupedCourses).map((groupName) => (
+                    groupedCourses[groupName].map((c) => {
+                      const selectedIndex = selectedOrder.indexOf(String(c.icid ?? c.id));
+                      const checked = selectedIndex >= 0;
+                      const courseId = String(c.icid ?? c.id);
+
+                      return (
+                    <tr key={courseId} className="border-t">
+                      <td className="p-2">{groupName}</td>
                       <td className="p-2">
-                        <input type="checkbox" checked={selectedOrder.indexOf(String(c.id)) >= 0 || selectedOrder.indexOf(c.id) >= 0} onChange={(e) => handleCheckChange(String(c.id), e.target.checked)} />
+                        <input type="checkbox" checked={checked} onChange={(e) => handleCheckChange(courseId, e.target.checked)} />
                       </td>
                       <td className="p-2">{c.coursecode}</td>
                       <td className="p-2">{c.coursename}</td>
+                      <td className="p-2">{checked ? selectedIndex + 1 : '-'}</td>
                     </tr>
+                      );
+                    })
                   ))}
                 </tbody>
               </table>
@@ -163,10 +239,49 @@ export default function StudentRegistrationPage() {
             <div className="mt-4 flex items-center justify-between">
               <div>Selected: {selectedOrder.length}</div>
               <div>
-                <button type="submit" className="rounded bg-green-600 px-4 py-2 text-white">Confirm Preferences</button>
+                <button type="submit" className="rounded bg-green-600 px-4 py-2 text-white">Verify & Submit</button>
               </div>
             </div>
           </form>
+        )}
+
+        {isConfirmOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                <h3 className="text-lg font-semibold text-slate-900">Confirm Your Preferences</h3>
+                <button type="button" onClick={() => setIsConfirmOpen(false)} className="text-slate-500 hover:text-slate-800">✕</button>
+              </div>
+              <div className="px-6 py-4">
+                <table className="min-w-full table-auto">
+                  <thead>
+                    <tr className="bg-slate-100 text-left">
+                      <th className="p-2">Course Code</th>
+                      <th className="p-2">Course Name</th>
+                      <th className="p-2">Preference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedPreferences.map((row) => (
+                      <tr key={row.instance_course_id} className="border-t">
+                        <td className="p-2">{row.coursecode}</td>
+                        <td className="p-2">{row.coursename}</td>
+                        <td className="p-2">{row.preferred}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+                <button type="button" onClick={() => setIsConfirmOpen(false)} className="rounded border border-slate-300 px-4 py-2 text-slate-700">
+                  Cancel
+                </button>
+                <button type="button" onClick={handleConfirmSubmission} className="rounded bg-blue-600 px-4 py-2 text-white">
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

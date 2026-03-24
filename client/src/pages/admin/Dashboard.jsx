@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
 import Notification from '../../components/common/Notification';
-import { getInstances, getPreferenceStatistics, setPreferenceFormStatus } from '../../api/instance.api';
+import {
+	getInstances,
+	getPreferenceFormStatus,
+	getPreferenceStatistics,
+	setPreferenceFormStatus
+} from '../../api/instance.api';
 import { getCourses } from '../../api/course.api';
 import { getStudents } from '../../api/student.api';
 
@@ -155,9 +160,18 @@ export default function AdminDashboard() {
 		setError('');
 	}
 
-	function handleInstanceForFormChange(instanceId) {
+	async function handleInstanceForFormChange(instanceId) {
 		setSelectedInstanceForForm(instanceId);
-		if (instanceId) {
+		if (!instanceId) {
+			setFormEnabledStatus('');
+			return;
+		}
+
+		try {
+			const response = await getPreferenceFormStatus(instanceId, token);
+			const enabled = Boolean(response?.data?.enabled);
+			setFormEnabledStatus(enabled ? '1' : '0');
+		} catch (_requestError) {
 			const instance = instances.find((row) => String(row.id) === String(instanceId));
 			const current = instance?.form_enabled ? '1' : '0';
 			setFormEnabledStatus(current);
@@ -463,6 +477,14 @@ export default function AdminDashboard() {
 														>
 															Close
 														</button>
+														<a
+															href="/registration.php"
+															target="_blank"
+															rel="noreferrer"
+															className="mt-3 w-full inline-flex justify-center rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 sm:mt-0 sm:w-auto"
+														>
+															Preview
+														</a>
 													</div>
 												</form>
 											</div>

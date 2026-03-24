@@ -1,9 +1,10 @@
 
 import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-// import { getDashboardPathByRole } from '../../utils/role';
+import { getDashboardPathByRole } from '../../utils/role';
 export default function Login() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { login, isAuthenticated, user } = useAuth();
   const [username, setUsername] = useState('');
@@ -19,8 +20,16 @@ export default function Login() {
     };
   }, []);
 
+  const redirectTo = location.state?.from?.pathname || (user ? getDashboardPathByRole(user.role) : '/dashboard');
+
+  // Only redirect if not already on the dashboard
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    const currentPath = location.pathname;
+    if (currentPath !== redirectTo) {
+      return <Navigate to={redirectTo} replace />;
+    }
+    // Already on the dashboard, render nothing (or a loader, or null)
+    return null;
   }
 
   const clearError = () => setError('');
@@ -45,10 +54,11 @@ export default function Login() {
 
     try {
       setIsSubmitting(true);
-      const nextUser = await login(username.trim(), password);
-      navigate('/dashboard', { replace: true });
+      const data = await login(username.trim(), password);
+      const dashPath = getDashboardPathByRole(data.user.role);
+      navigate(dashPath, { replace: true });
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || 'Invalid email or password');
+      setError(requestError?.response?.data?.error || requestError?.response?.data?.message || 'Invalid email or password');
     } finally {
       setIsSubmitting(false);
     }

@@ -10,8 +10,19 @@ exports.authenticate = async (username, password) => {
 	const ok = await hash.compare(password, stored);
 	if (!ok && stored !== password) throw new Error('Invalid credentials');
 
-	const token = jwt.sign({ deptid: dept.deptid, username: dept.username, role: 'department' });
-	return { user: { deptid: dept.deptid, username: dept.username, name: dept.name, shortname: dept.shortname, role: 'department' }, token };
+	// Use role from DB, fallback to 'hod'
+	const role = dept.role || 'hod';
+	const token = jwt.sign({ deptid: dept.deptid, username: dept.username, role });
+	return {
+		user: {
+			deptid: dept.deptid,
+			username: dept.username,
+			name: dept.name,
+			shortname: dept.shortname,
+			role
+		},
+		token
+	};
 };
 
 exports.changePassword = async ({ deptid, currentPassword, newPassword }) => {

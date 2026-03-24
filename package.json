@@ -1,5 +1,8 @@
 {
   "name": "oems-monorepo",
   "private": true,
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "dependencies": {
+    "chartjs-plugin-datalabels": "^2.2.0"
+  }
 }

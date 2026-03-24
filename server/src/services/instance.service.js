@@ -1,4 +1,5 @@
 const instanceModel = require('../models/instance.model');
+const allocationService = require('./allocation.service');
 
 const VALID_STATUSES = new Set(['Active', 'Inactive']);
 
@@ -255,8 +256,24 @@ async function runAllocation(instanceId) {
 		throw error;
 	}
 
-	// Delegate actual allocation logic to the model
-	return instanceModel.runAllocationByInstance(numericId);
+	await instanceModel.setFinalPreferencesByInstance(numericId);
+	const rejection = await instanceModel.rejectUnderSubscribedCoursesByInstance(numericId);
+	const rejectedCourseIds = Array.isArray(rejection?.rejectedCourses)
+		? rejection.rejectedCourses
+			.map((row) => Number(row.instance_course_id))
+			.filter((value) => Number.isInteger(value) && value > 0)
+		: [];
+
+	if (rejectedCourseIds.length > 0) {
+		await instanceModel.upgradePreferencesByInstance(numericId, rejectedCourseIds);
+	}
+
+	const allocation = await instanceModel.allocateByInstance(numericId);
+	return {
+		success: true,
+		rejectedCourseIds,
+		allocation,
+	};
 }
 
 function ensureValidInstanceId(instanceId) {
@@ -348,6 +365,12 @@ function parseEnabledFlag(value) {
 	throw error;
 }
 
+async function getAllocationsForDownload(instanceId) {
+	const numericId = ensureValidInstanceId(instanceId);
+	await ensureInstanceExists(numericId);
+	return allocationService.getAllocationsForDownload(numericId);
+}
+
 module.exports = {
 	getInstances,
 	getInstanceView,
@@ -357,13 +380,13 @@ module.exports = {
 	removeInstance,
 	getPreferenceStatistics,
 	getPreferenceStatisticsDetails,
-	resetAllocations
-,
+	resetAllocations,
 	runAllocation,
 	setFinalPreferences,
 	rejectUnderSubscribedCourses,
 	upgradePreferences,
 	allocate,
 	getPreferenceFormStatus,
-	setPreferenceFormStatus
+	setPreferenceFormStatus,
+	getAllocationsForDownload,
 };

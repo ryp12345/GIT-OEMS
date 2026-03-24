@@ -13,26 +13,48 @@ import AllocationPage from './pages/admin/Allocation';
 import Reports from './pages/admin/Reports';
 import StudentRegistrationPage from './pages/student/Registration';
 import CheckNamePage from './pages/student/CheckName';
+import DeanDashboard from './pages/dean/Dashboard';
+import HodDashboard from './pages/hod/Dashboard';
+import ProtectedRoute from './routes/ProtectedRoute';
 
 export default function App(){
 	return (
 		<AuthProvider>
 			<BrowserRouter>
-				<Routes>
-					<Route path="/login" element={<Login/>} />
-					<Route path="/change-password" element={<ChangePassword />} />
-					<Route path="/dashboard" element={<AdminDashboard />} />
-					<Route path="/courses" element={<CoursesPage />} />
-					<Route path="/elective-instance" element={<ElectiveInstancePage />} />
-					<Route path="/elective-instance/:id/view" element={<ElectiveInstanceViewPage />} />
-					<Route path="/elective-preference" element={<ElectivePreferencePage />} />
-					<Route path="/allocation" element={<AllocationPage />} />
-					<Route path="/reports" element={<Reports />} />
-					<Route path="/student/registration" element={<StudentRegistrationPage />} />
-					<Route path="/student/check" element={<CheckNamePage />} />
-					<Route path="/students" element={<StudentsPage />} />
-					<Route path="/" element={<Navigate to="/login" replace />} />
-				</Routes>
+				   <Routes>
+					   <Route path="/login" element={<Login/>} />
+					   <Route path="/student/registration" element={<StudentRegistrationPage />} />
+					   <Route path="/student/check" element={<CheckNamePage />} />
+
+					   {/* Admin-only routes */}
+					   <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
+						   <Route path="/dashboard" element={<AdminDashboard />} />
+						   <Route path="/courses" element={<CoursesPage />} />
+						   <Route path="/elective-instance" element={<ElectiveInstancePage />} />
+						   <Route path="/elective-instance/:id/view" element={<ElectiveInstanceViewPage />} />
+						   <Route path="/elective-preference" element={<ElectivePreferencePage />} />
+						   <Route path="/allocation" element={<AllocationPage />} />
+						   <Route path="/reports" element={<Reports />} />
+						   <Route path="/students" element={<StudentsPage />} />
+					   </Route>
+
+					   {/* Dean-only routes */}
+					   <Route element={<ProtectedRoute allowedRoles={["dean"]} />}>
+						   <Route path="/dean/dashboard" element={<DeanDashboard />} />
+					   </Route>
+
+					   {/* HOD-only routes */}
+					   <Route element={<ProtectedRoute allowedRoles={["hod"]} />}>
+						   <Route path="/hod/dashboard" element={<HodDashboard />} />
+					   </Route>
+
+					   {/* Shared protected route (e.g., change password) */}
+					   <Route element={<ProtectedRoute allowedRoles={["admin","dean","hod"]} />}>
+						   <Route path="/change-password" element={<ChangePassword />} />
+					   </Route>
+
+					   <Route path="/" element={<Navigate to="/login" replace />} />
+				   </Routes>
 			</BrowserRouter>
 		</AuthProvider>
 	);

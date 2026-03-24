@@ -39,7 +39,11 @@ export default function CheckNamePage() {
 
         {result && (
           <div className="rounded-lg bg-white p-4 shadow">
-            {result.registered ? (
+            {!result.instance && result.message ? (
+              <div className="rounded border border-amber-200 bg-amber-50 p-4 text-amber-800">
+                {result.message}
+              </div>
+            ) : result.registered ? (
               <>
                 <h3 className="font-semibold mb-2">Existing Preferences</h3>
                 <table className="min-w-full table-auto">
@@ -49,6 +53,7 @@ export default function CheckNamePage() {
                       <th className="p-2">Course Name</th>
                       <th className="p-2">Pref</th>
                       <th className="p-2">Final</th>
+                      <th className="p-2">Allocation Status</th>
                       <th className="p-2">Status</th>
                     </tr>
                   </thead>
@@ -60,6 +65,7 @@ export default function CheckNamePage() {
                         <td className="p-2">{p.preferred}</td>
                         <td className="p-2">{p.final_preference}</td>
                         <td className="p-2">{p.allocation_status}</td>
+                        <td className="p-2">{p.status ?? '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -67,6 +73,9 @@ export default function CheckNamePage() {
               </>
             ) : (
               <>
+                <div className="mb-4 rounded border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
+                  Student verified for {result.instance?.instancename || 'active instance'}.
+                </div>
                 <h3 className="font-semibold mb-2">Available Courses (grouped)</h3>
                 {Object.keys(result.courses || {}).map((grp) => (
                   <div key={grp} className="mb-4">

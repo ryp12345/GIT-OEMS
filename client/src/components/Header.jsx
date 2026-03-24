@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -22,7 +23,8 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isProfileOpen]);
 
-  const displayName = user?.email || 'User';
+  // Prefer username, fallback to email, fallback to 'User'
+  const displayName = user?.username || user?.email || 'User';
   const initials = (displayName?.[0] || 'U').toUpperCase();
 
   const handleLogout = () => {
