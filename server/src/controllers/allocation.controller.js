@@ -35,3 +35,23 @@ exports.downloadAllocations = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.getAllocationsJson = async (req, res, next) => {
+  try {
+    const instanceId = req.params.id;
+    const departmentId = req.query.department_id ? Number(req.query.department_id) : null;
+    const { allocated, unallocated, summary } = await instanceService.getAllocationsForDownload(instanceId);
+
+    let filteredAllocated = allocated || [];
+    let filteredUnallocated = unallocated || [];
+
+    if (departmentId && Number.isInteger(departmentId)) {
+      filteredAllocated = filteredAllocated.filter((row) => Number(row.department_id) === departmentId);
+      filteredUnallocated = filteredUnallocated.filter((row) => Number(row.department_id) === departmentId);
+    }
+
+    res.json({ allocated: filteredAllocated, unallocated: filteredUnallocated, summary });
+  } catch (error) {
+    next(error);
+  }
+};

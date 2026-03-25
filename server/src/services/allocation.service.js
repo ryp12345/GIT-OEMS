@@ -8,9 +8,11 @@ async function getAllocationsForDownload(instanceId) {
       s.uid,
       s.name,
       s.email,
+      s.department_id,
       d.shortname AS department,
       ic.coursecode,
       c.coursename,
+      p.preferred,
       p.final_preference,
       p.allocation_status
      FROM public.preferences p
@@ -27,10 +29,11 @@ async function getAllocationsForDownload(instanceId) {
 
 // Matches PHP getUnallocatedStudents: students who still have status=0 (pending) preferences
   const unallocatedResult = await pool.query(
-    `SELECT DISTINCT s.name, s.usn
+    `SELECT DISTINCT s.name, s.usn, s.department_id, d.shortname AS department
      FROM public.preferences p
      JOIN public.instance_courses ic ON ic.id = p.instance_course_id
      JOIN public.students s ON UPPER(s.usn) = UPPER(p.usn)
+     LEFT JOIN public.departments d ON d.deptid = s.department_id
      WHERE ic.instance_id = $1
        AND p.status = 0
      ORDER BY s.usn ASC`,

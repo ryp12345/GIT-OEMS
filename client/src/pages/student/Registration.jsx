@@ -85,7 +85,7 @@ export default function StudentRegistrationPage() {
         setCourses(flat);
         setSelectedOrder([]);
       }
-      setShowBasic(false);
+      // setShowBasic(false); // Keep basic details and Proceed button visible
       setShowCourses(true);
     } catch (err) {
       setNotification({ show: true, message: err?.response?.data?.error || err?.message || 'Failed to verify', type: 'error' });
@@ -138,13 +138,14 @@ export default function StudentRegistrationPage() {
     }
   }
 
+
   return (
-    <div className="min-h-screen bg-slate-100 flex items-start justify-center p-6">
-      <div className="w-full max-w-4xl">
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+      <div className="w-full max-w-3xl bg-white rounded-lg shadow p-6">
         <Notification show={notification.show} message={notification.message} type={notification.type} onClose={() => setNotification({ show: false, message: '', type: 'info' })} />
 
-        <h1 className="text-2xl font-semibold">Elective Registration</h1>
-        <p className="text-sm text-gray-600 mb-4">Follow the steps to save your preferences.</p>
+        <h1 className="text-2xl font-semibold mb-2 text-center">Elective Registration</h1>
+        <p className="text-sm text-gray-600 mb-6">Follow the steps to save your preferences.</p>
 
         <div className="mb-6">
           <label className="inline-flex items-center">
@@ -154,8 +155,8 @@ export default function StudentRegistrationPage() {
         </div>
 
         {showBasic && (
-          <div className="mb-6 rounded-lg bg-white p-4 shadow">
-            <h2 className="font-semibold">Basic Details</h2>
+          <div className="mb-6 rounded-lg bg-slate-50 p-4 shadow">
+            <h2 className="font-semibold mb-2">Basic Details</h2>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3 mt-3">
               <input placeholder="USN" value={basic.usn} onChange={(e) => setBasic((s) => ({ ...s, usn: e.target.value }))} className="border p-2 rounded" />
               <input placeholder="UID" value={basic.uid} onChange={(e) => setBasic((s) => ({ ...s, uid: e.target.value }))} className="border p-2 rounded" />
@@ -169,7 +170,7 @@ export default function StudentRegistrationPage() {
         )}
 
         {showCourses && registeredPreferences && (
-          <div className="rounded-lg bg-white p-4 shadow">
+          <div className="rounded-lg bg-slate-50 p-4 shadow">
             <h3 className="font-semibold mb-3">Existing Preferences</h3>
             <table className="min-w-full table-auto">
               <thead>
