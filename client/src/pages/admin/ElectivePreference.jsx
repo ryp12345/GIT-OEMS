@@ -52,7 +52,7 @@ function StatisticsChartModal({ row, onClose }) {
       backgroundColor: series.backgroundColor || fallbackColors[index % fallbackColors.length],
       borderRadius: 8,
       borderSkipped: false,
-      maxBarThickness: 34
+      maxBarThickness: 60 // Increased for larger boxes
     }));
 
     // Plugin to show stack totals above bars (match PHP: radius 18, border 3, font 14px)
@@ -227,7 +227,7 @@ function StatisticsChartModal({ row, onClose }) {
           </div>
         </div>
 
-        <div className="h-[420px] p-6">
+        <div className="h-[420px] p-6"> {/* Revert to original modal height */}
           {seriesCount > 0 ? (
             <canvas ref={canvasRef} />
           ) : (
@@ -254,15 +254,27 @@ export default function ElectivePreferencePage() {
   // Find all unique preferences in the data for dynamic columns
   function getAllPreferences(rows) {
     const prefs = new Set();
-    rows.forEach(row => {
-      if (Array.isArray(row.preferences)) {
-        row.preferences.forEach(p => prefs.add(p.prefIndex));
-      } else {
-        // fallback for old API shape
-        [1,2].forEach(i => prefs.add(i));
+    rows.forEach((row) => {
+      // Preferred shape from current API/PHP parity: p1_count, p1_min_grade, ...
+      Object.keys(row || {}).forEach((key) => {
+        const match = /^p(\d+)_count$/i.exec(key);
+        if (match) {
+          prefs.add(Number(match[1]));
+        }
+      });
+
+      // Backward-compatible shape: row.preferences array
+      if (Array.isArray(row?.preferences)) {
+        row.preferences.forEach((p) => prefs.add(Number(p.prefIndex)));
       }
     });
-    return Array.from(prefs).sort((a, b) => a - b);
+
+    // Match legacy PHP page behavior when no rows are returned yet.
+    if (prefs.size === 0) {
+      return [1, 2];
+    }
+
+    return Array.from(prefs).filter(Number.isFinite).sort((a, b) => a - b);
   }
 
   function applyPreferenceDetailsResponse(payload) {
@@ -450,11 +462,11 @@ export default function ElectivePreferencePage() {
                   <tbody>
                     {isLoading ? (
                       <tr>
-                        <td colSpan={allPreferences.length * 4 + 7} className="px-6 py-12 text-center text-gray-500">Loading...</td>
+                        <td colSpan={allPreferences.length * 4 + 8} className="px-6 py-12 text-center text-gray-500">Loading...</td>
                       </tr>
                     ) : rows.length === 0 && !hasSelectedInstance ? (
                       <tr>
-                        <td colSpan={allPreferences.length * 4 + 7} className="px-6 py-12 text-center text-gray-500">
+                        <td colSpan={allPreferences.length * 4 + 8} className="px-6 py-12 text-center text-gray-500">
                           Please select an instance to view preferences.
                         </td>
                       </tr>
@@ -467,20 +479,44 @@ export default function ElectivePreferencePage() {
                             ? 'bg-emerald-100'
                             : 'bg-gray-100';
 
-                        // Map preferences for this row by index
-                        const prefMap = {};
-                        if (Array.isArray(row.preferences)) {
-                          row.preferences.forEach(p => {
-                            prefMap[p.prefIndex] = p;
-                          });
-                        }
+                        // Build per-preference stats from current API shape (p1_*, p2_*)
+                        const getPreferenceCell = (pref) => {
+                          const count = row[`p${pref}_count`];
+                          const min = row[`p${pref}_min_grade`];
+                          const median = row[`p${pref}_median_grade`];
+                          const max = row[`p${pref}_max_grade`];
+
+                          // Backward compatibility if older API sends row.preferences
+                          if (
+                            count == null &&
+                            min == null &&
+                            median == null &&
+                            max == null &&
+                            Array.isArray(row.preferences)
+                          ) {
+                            const legacy = row.preferences.find((p) => Number(p.prefIndex) === pref) || {};
+                            return {
+                              count: legacy.count,
+                              min_grade: legacy.min_grade,
+                              median_grade: legacy.median_grade,
+                              max_grade: legacy.max_grade
+                            };
+                          }
+
+                          return {
+                            count,
+                            min_grade: min,
+                            median_grade: median,
+                            max_grade: max
+                          };
+                        };
 
                         return (
                           <tr key={`${row.coursecode}-${index}`} className={`${statusRowClass} border-b border-gray-200`}>
                             <td className="border px-3 py-2 text-sm">{index + 1}</td>
                             <td className="border px-3 py-2 text-sm">{row.coursename} ({row.coursecode})</td>
                             {allPreferences.map((pref) => {
-                              const p = prefMap[pref] || {};
+                              const p = getPreferenceCell(pref);
                               return [
                                 <td key={`p${pref}_count`} className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{p.count ?? ''}</td>,
                                 <td key={`p${pref}_min`} className="border px-3 py-2 text-center text-sm">{formatGrade(p.min_grade)}</td>,
@@ -515,7 +551,7 @@ export default function ElectivePreferencePage() {
 
                     {hasSelectedInstance && !isLoading ? (
                       <tr className="bg-gray-200">
-                        <td colSpan={allPreferences.length * 4 + 3} className="border px-3 py-2 text-sm font-bold">Grand Total Allocations</td>
+                        <td colSpan={allPreferences.length * 4 + 5} className="border px-3 py-2 text-sm font-bold">Grand Total Allocations</td>
                         <td className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{grandTotalAllocations}</td>
                         <td className="border px-3 py-2" />
                         <td className="border px-3 py-2" />
