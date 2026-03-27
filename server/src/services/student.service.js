@@ -210,8 +210,7 @@ async function importStudentsFromFile(fileBuffer) {
 		.map((row) => Object.entries(row).reduce((result, [key, value]) => {
 			result[normalizeHeaderName(key)] = value;
 			return result;
-		}, {}))
-		.filter((row) => Object.values(row).some((value) => String(value || '').trim() !== ''));
+		}, {}));
 
 	if (rows.length === 0) {
 		const error = new Error('Uploaded file is empty');
@@ -238,6 +237,19 @@ async function importStudentsFromFile(fileBuffer) {
 		const departmentValue = getRowValue(row, ['department_id', 'deptid', 'department', 'department_name']);
 		const semester = getRowValue(row, ['semester', 'current_sem', 'current_semester']);
 		const cgpa = getRowValue(row, ['cgpa', 'grade']);
+
+		const hasAnyStudentField = [
+			name,
+			email,
+			uid,
+			usn,
+			semester,
+			cgpa
+		].some((value) => Boolean(String(value || '').trim()));
+
+		if (!hasAnyStudentField) {
+			continue;
+		}
 
 		if (!name || !email || !uid || !usn || !departmentValue || !semester || !cgpa) {
 			const error = new Error(`Row ${rowNumber}: name, email, uid, usn, department, semester, and cgpa are required`);
@@ -267,6 +279,12 @@ async function importStudentsFromFile(fileBuffer) {
 		const createdStudent = await studentModel.createStudent(payload);
 		await studentModel.createAcademicRecord(payload);
 		importedStudents.push(await studentModel.getStudentById(createdStudent.id));
+	}
+
+	if (importedStudents.length === 0) {
+		const error = new Error('Uploaded file does not contain any student rows');
+		error.statusCode = 400;
+		throw error;
 	}
 
 	return {

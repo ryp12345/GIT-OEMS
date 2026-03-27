@@ -223,7 +223,7 @@ export default function ElectiveInstanceViewPage() {
 									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
 								</svg>
 							</div>
-							<p className="text-sm text-gray-600">Filter by course code, course name, department, or intake values.</p>
+							{/* <p className="text-sm text-gray-600">Filter by course code, course name, department, or intake values.</p> */}
 						</div>
 
 						<div className="overflow-hidden rounded-xl bg-white shadow-xl">

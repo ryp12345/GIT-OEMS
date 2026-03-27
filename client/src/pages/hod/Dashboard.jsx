@@ -1,16 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { getInstances } from '../../api/instance.api';
-import { getCourseMeta } from '../../api/course.api';
+import { getCourses } from '../../api/course.api';
+import { getInstanceView } from '../../api/instance.api';
 import { getAllocations } from '../../api/allocation.api';
-
-const cards = [
-  { title: 'Messages', value: '4', tone: 'bg-sky-600' },
-  { title: 'Notifications', value: '10', tone: 'bg-amber-500' },
-  { title: 'Tasks', value: '9', tone: 'bg-emerald-600' },
-  { title: 'Reports', value: '65', tone: 'bg-indigo-600' }
-];
 
 export default function HodDashboard() {
   const navigate = useNavigate();
@@ -26,10 +20,53 @@ export default function HodDashboard() {
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(1);
 
+  const [courses, setCourses] = useState([]);
+  const [instanceCourses, setInstanceCourses] = useState([]);
+  const [search, setSearch] = useState('');
+
+  const deptId = user?.deptid || user?.department_id || user?.deptId || null;
+  const deptInstanceCoursesCount = instanceCourses.filter((c) => {
+    if (!deptId) return true;
+    const belongsToDept = Number(c.department_id) === Number(deptId);
+    const permitted = Array.isArray(c.department_ids) && c.department_ids.includes(Number(deptId));
+    return belongsToDept || permitted;
+  }).length;
+
+  
+
+  // Show zeros until an instance is selected
+  const cards = [
+    { key: 'allocated', title: 'Allocated Students', value: selectedInstance ? allocations.length : 0, tone: 'bg-amber-500' },
+    { key: 'courses', title: 'Courses Offered', value: selectedInstance ? deptInstanceCoursesCount : 0, tone: 'bg-indigo-600' }
+  ];
+
+  const filteredAllocations = useMemo(() => {
+    const q = String(search || '').trim().toLowerCase();
+    if (!q) return allocations;
+    return allocations.filter((row) => {
+      const usn = String(row.usn || '').toLowerCase();
+      const name = String(row.name || '').toLowerCase();
+      return usn.includes(q) || name.includes(q);
+    });
+  }, [allocations, search]);
+
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(filteredAllocations.length / PAGE_SIZE)), [filteredAllocations.length]);
+  const visiblePages = useMemo(() => {
+    const startPage = Math.max(1, page - 1);
+    const endPage = Math.min(totalPages, startPage + 2);
+    const adjustedStart = Math.max(1, endPage - 2);
+
+    return Array.from({ length: endPage - adjustedStart + 1 }, (_, index) => adjustedStart + index);
+  }, [page, totalPages]);
+
   function handleLogout() {
     logout();
     navigate('/login', { replace: true });
   }
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, allocations]);
 
   useEffect(() => {
     async function loadMeta() {
@@ -37,6 +74,15 @@ export default function HodDashboard() {
         const instRes = await getInstances(token);
         const instData = instRes?.data?.data || instRes?.data || [];
         setInstances(Array.isArray(instData) ? instData : []);
+
+        // fetch courses for cards
+        try {
+          const coursesRes = await getCourses(token);
+          const courseData = coursesRes?.data?.data || coursesRes?.data || [];
+          setCourses(Array.isArray(courseData) ? courseData : []);
+        } catch (innerErr) {
+          // ignore course fetch errors for now
+        }
       } catch (err) {
         // ignore silently for now
       }
@@ -54,12 +100,19 @@ export default function HodDashboard() {
       const departmentId = user?.deptid || user?.department_id || user?.deptId || null;
       try {
         setIsLoadingAllocations(true);
-        const res = await getAllocations(selectedInstance, departmentId, token);
-        const data = res?.data || {};
-        setAllocations(Array.isArray(data.allocated) ? data.allocated : []);
+        const [allocRes, viewRes] = await Promise.all([
+          getAllocations(selectedInstance, departmentId, token),
+          getInstanceView(selectedInstance, token)
+        ]);
+        const allocData = allocRes?.data || {};
+        setAllocations(Array.isArray(allocData.allocated) ? allocData.allocated : []);
+        const viewData = viewRes?.data || viewRes;
+        const instCourses = Array.isArray(viewData?.courses) ? viewData.courses : viewData?.courses || [];
+        setInstanceCourses(Array.isArray(instCourses) ? instCourses : []);
       } catch (err) {
         setError(err?.response?.data?.error || 'Unable to load allocations');
         setAllocations([]);
+        setInstanceCourses([]);
       } finally {
         setIsLoadingAllocations(false);
       }
@@ -98,25 +151,34 @@ export default function HodDashboard() {
 
         <div className="mt-8 rounded-xl bg-white p-6 shadow-lg">
           <h2 className="text-lg font-semibold text-slate-900 text-center">Department Allocations</h2>
-          <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Instance</label>
+          <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-4">
+            <div className="relative w-full sm:flex-1 sm:min-w-0 sm:max-w-sm">
+              <label className="sr-only">Search allocations</label>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search students..."
+                className="mt-1 w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              />
+              <svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+
+            <div className="w-full sm:w-80 sm:max-w-md">
               <select
                 value={selectedInstance}
                 onChange={(e) => setSelectedInstance(e.target.value)}
-                className="mt-1 block w-96 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                aria-label="Select instance"
+                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm"
               >
-                <option value="">-- Select instance --</option>
+                <option value="">Select Instance</option>
                 {instances.map((inst) => (
                   <option key={inst.id} value={inst.id}>{`${inst.instancename} (${inst.academic_year} - sem ${inst.semester})`}</option>
                 ))}
               </select>
             </div>
 
-            
-
-            <div className="ml-auto" />
+          
           </div>
 
           {error ? <div className="mt-4 text-sm text-red-600">{error}</div> : null}
@@ -125,6 +187,7 @@ export default function HodDashboard() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-blue-600 rounded-t-lg">
                 <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white">Sl.No</th>
                   <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-white">USN</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-white">Name</th>
                   <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-white">Preferred</th>
@@ -134,12 +197,13 @@ export default function HodDashboard() {
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
                 {isLoadingAllocations ? (
-                  <tr><td colSpan="5" className="px-6 py-12 text-center text-gray-500">Loading...</td></tr>
-                ) : allocations.length === 0 ? (
-                  <tr><td colSpan="5" className="px-6 py-12 text-center text-gray-500">No allocations found</td></tr>
+                    <tr><td colSpan="6" className="px-6 py-12 text-center text-gray-500">Loading...</td></tr>
+                ) : filteredAllocations.length === 0 ? (
+                    <tr><td colSpan="6" className="px-6 py-12 text-center text-gray-500">No allocations found</td></tr>
                 ) : (
-                  allocations.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row, idx) => (
+                  filteredAllocations.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row, idx) => (
                     <tr key={`${row.usn}-${row.coursecode}-${(page-1)*PAGE_SIZE+idx}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'}>
+                        <td className="whitespace-nowrap px-4 py-4 text-sm font-medium text-gray-900">{(page - 1) * PAGE_SIZE + idx + 1}</td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm text-gray-700 text-center">{row.usn}</td>
                       <td className="px-4 py-4 text-sm text-gray-700 text-left">{row.name}</td>
                       <td className="px-4 py-4 text-sm text-gray-700 text-center">{row.preferred != null ? String(row.preferred) : '-'}</td>
@@ -151,9 +215,9 @@ export default function HodDashboard() {
               </tbody>
             </table>
           </div>
-          {allocations.length > 0 && (
+          {filteredAllocations.length > 0 && (
             <div className="mt-3 flex items-center justify-between">
-              <div className="text-sm text-gray-600">Showing {Math.min((page-1)*PAGE_SIZE+1, allocations.length)} to {Math.min(page*PAGE_SIZE, allocations.length)} of {allocations.length}</div>
+              <div className="text-sm text-gray-600">Showing {Math.min((page-1)*PAGE_SIZE+1, filteredAllocations.length)} to {Math.min(page*PAGE_SIZE, filteredAllocations.length)} of {filteredAllocations.length}</div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -162,19 +226,20 @@ export default function HodDashboard() {
                   className="rounded border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700 disabled:opacity-50"
                 >Prev</button>
                 <div className="flex items-center gap-1">
-                  {Array.from({ length: Math.max(1, Math.ceil(allocations.length / PAGE_SIZE)) }, (_, i) => (
+                  {visiblePages.map((pageNumber) => (
                     <button
-                      key={i}
+                      key={pageNumber}
                       type="button"
-                      onClick={() => setPage(i + 1)}
-                      className={`rounded border px-3 py-1 ${page === i + 1 ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-gray-700'}`}
-                    >{i + 1}</button>
+                      onClick={() => setPage(pageNumber)}
+                      className={`rounded border px-3 py-1 ${page === pageNumber ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-gray-700'}`}
+                    >{pageNumber}</button>
                   ))}
                 </div>
+                <span className="text-sm text-gray-700">of {totalPages}</span>
                 <button
                   type="button"
-                  onClick={() => setPage((c) => Math.min(Math.ceil(allocations.length / PAGE_SIZE), c + 1))}
-                  disabled={page === Math.ceil(allocations.length / PAGE_SIZE)}
+                  onClick={() => setPage((c) => Math.min(totalPages, c + 1))}
+                  disabled={page === totalPages}
                   className="rounded border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700 disabled:opacity-50"
                 >Next</button>
               </div>

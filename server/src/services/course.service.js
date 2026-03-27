@@ -225,8 +225,7 @@ async function importCoursesFromFile(fileBuffer) {
 		.map((row) => Object.entries(row).reduce((result, [key, value]) => {
 			result[normalizeHeaderName(key)] = value;
 			return result;
-		}, {}))
-		.filter((row) => Object.values(row).some((value) => String(value || '').trim() !== ''));
+		}, {}));
 
 	if (rows.length === 0) {
 		const error = new Error('Uploaded file is empty');
@@ -268,6 +267,20 @@ async function importCoursesFromFile(fileBuffer) {
 		const prerequisiteValue = getRowValue(row, ['pre_req', 'pre_req_value', 'prereq', 'pre_requisite', 'pre_requisite_value', 'prerequisites']);
 		const restrictedValue = getRowValue(row, ['restricted', 'restricted_course', 'restricted_course_code', 'restrictedcoursecode']);
 		const compulsoryValue = getRowValue(row, ['compulsory_prereq', 'compulsory_pre_requisite', 'compulsory_prerequisite', 'is_prerequesities_compulsory10']);
+
+		const hasAnyCourseField = [
+			coursecode,
+			coursename,
+			semester,
+			prerequisiteType,
+			prerequisiteValue,
+			restrictedValue,
+			compulsoryValue
+		].some((value) => Boolean(String(value || '').trim()));
+
+		if (!hasAnyCourseField) {
+			continue;
+		}
 
 		if (!coursecode || !coursename || !semester || !departmentValue) {
 			const error = new Error(`Row ${rowNumber}: course code, course name, semester, and department are required`);
@@ -313,12 +326,12 @@ async function importCoursesFromFile(fileBuffer) {
 		let normalizedRestricted = null;
 		if (restrictedValue) {
 			const restrictedCourse = courseLookup.get(restrictedValue.toLowerCase());
-			if (!restrictedCourse) {
-				const error = new Error(`Row ${rowNumber}: restricted course "${restrictedValue}" was not found`);
-				error.statusCode = 400;
-				throw error;
+			if (restrictedCourse) {
+				normalizedRestricted = String(restrictedCourse.id);
+			} else {
+				// Keep unresolved restricted value as course code/text.
+				normalizedRestricted = restrictedValue;
 			}
-			normalizedRestricted = String(restrictedCourse.id);
 		}
 
 		const payload = normalizePayload({
@@ -337,6 +350,12 @@ async function importCoursesFromFile(fileBuffer) {
 		courseLookup.set(payload.coursecode.toLowerCase(), created);
 		courseLookup.set(String(created.id), created);
 		importedCourses.push(created);
+	}
+
+	if (importedCourses.length === 0) {
+		const error = new Error('Uploaded file does not contain any course rows');
+		error.statusCode = 400;
+		throw error;
 	}
 
 	return {
