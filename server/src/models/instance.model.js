@@ -179,7 +179,7 @@ async function setPreferenceFormStatusById(id, enabled) {
 }
 
 async function getPreferenceStatisticsByInstance(instanceId) {
-	       const result = await pool.query(
+	       /* const result = await pool.query(
 		       `SELECT
 			       d.deptid AS id,
 			       d.shortname AS department,
@@ -205,8 +205,34 @@ async function getPreferenceStatisticsByInstance(instanceId) {
 		       GROUP BY d.deptid, d.shortname
 		       ORDER BY d.shortname ASC`,
 		       [instanceId]
+	       ); */
+			const result = await pool.query(
+		       `SELECT
+			       d.deptid AS id,
+			       d.shortname AS department,
+			       COUNT(DISTINCT s.usn) AS total_students,
+			       COUNT(DISTINCT p.usn) AS submitted,
+			       COUNT(DISTINCT s.usn) - COUNT(DISTINCT p.usn) AS pending
+		       FROM public.departments d
+		       LEFT JOIN public.students s ON s.department_id = d.deptid
+			       AND LOWER(s.usn) IN (
+				       SELECT LOWER(usn)
+				       FROM public.student_academic_records sar
+				       WHERE CAST(sar.semester AS INTEGER) = (
+					       SELECT semester FROM public.instances WHERE id = $1
+				       )
+			       )
+		       LEFT JOIN public.preferences p ON LOWER(p.usn) = LOWER(s.usn)
+			       AND p.instance_course_id IN (
+				       SELECT ic.id
+				       FROM public.instance_courses ic
+				       WHERE ic.instance_id = $1
+			       )
+		       WHERE d.deptid IN (SELECT DISTINCT department_id FROM public.students)
+		       GROUP BY d.deptid, d.shortname
+		       ORDER BY d.shortname ASC`,
+		       [instanceId]
 	       );
-
 	       return result.rows.map((row, index) => ({
 		       slNo: index + 1,
 		       department: row.department,
