@@ -810,10 +810,15 @@ async function allocateByInstance(instanceId) {
 					const baseQuota = Math.floor(available / 6);
 					let carry = 0;
 
-					for (const [low, high] of bands) {
+					for (let i = 0; i < bands.length; i++) {
 						if (allocatedTotal >= available) break;
 
-						const quota = baseQuota + carry;
+						const [low, high] = bands[i];
+						const isLastBand = i === bands.length - 1;
+
+						// For the last band, allow it to use all remaining seats
+						// instead of being capped by the per-band quota.
+						const quota = isLastBand ? (available - allocatedTotal) : (baseQuota + carry);
 						if (quota <= 0) continue;
 
 						const bandRes = await client.query(
@@ -845,8 +850,10 @@ async function allocateByInstance(instanceId) {
 								[pref, bandUsns, instanceId]
 							);
 							allocatedTotal += found;
-							carry = (baseQuota + carry) - found;
-						} else {
+							if (!isLastBand) {
+								carry = (baseQuota + carry) - found;
+							}
+						} else if (!isLastBand) {
 							carry += baseQuota;
 						}
 					}
