@@ -244,54 +244,48 @@ async function getPreferenceStatisticsByInstance(instanceId) {
 
 async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}) {
 	const strictSarJoin = options.strictSarJoin !== false;
-	const strictCourseFilterClause = strictSarJoin ? 'HAVING COUNT(pd.instance_course_id) > 0' : '';
-	const sarJoinClause = strictSarJoin
-		? `JOIN public.student_academic_records sar
-			ON sar.usn = p.usn
-			AND CAST(sar.semester AS INTEGER) = i.semester`
-		: `LEFT JOIN public.student_academic_records sar
-			ON sar.usn = p.usn
-			AND CAST(sar.semester AS INTEGER) = i.semester`;
+	const sarJoinType = strictSarJoin ? 'JOIN' : 'LEFT JOIN';
+
+	const calculateMedian = (grades) => {
+		if (!Array.isArray(grades) || grades.length === 0) {
+			return null;
+		}
+
+		const sorted = [...grades].sort((a, b) => a - b);
+		const count = sorted.length;
+		const middle = Math.floor(count / 2);
+
+		if (count % 2) {
+			return sorted[middle];
+		}
+
+		return (sorted[middle - 1] + sorted[middle]) / 2;
+	};
 
 	const [detailsResult, chartResult] = await Promise.all([
 		pool.query(
-		`WITH preference_data AS (
-			SELECT
-				p.instance_course_id,
-				p.preferred,
-				p.final_preference,
-				NULLIF(REGEXP_REPLACE(COALESCE(sar.grade, ''), '[^0-9.]', '', 'g'), '')::NUMERIC AS grade_num
-			FROM public.preferences p
-			JOIN public.instance_courses ic ON ic.id = p.instance_course_id
-			JOIN public.instances i ON i.id = ic.instance_id
-			${sarJoinClause}
-			WHERE ic.instance_id = $1
-		)
-		SELECT
+		`SELECT
 			ic.id AS instance_course_id,
-			c.coursename,
+			COALESCE(NULLIF(ic.allocation_status, ''), 'Pending') AS allocation_status,
+			i.id AS instanceid,
+			i.semester,
 			ic.coursecode,
-			COUNT(*) FILTER (WHERE pd.preferred = 1) AS p1_count,
-			MIN(pd.grade_num) FILTER (WHERE pd.preferred = 1) AS p1_min_grade,
-			PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY pd.grade_num) FILTER (WHERE pd.preferred = 1) AS p1_median_grade,
-			MAX(pd.grade_num) FILTER (WHERE pd.preferred = 1) AS p1_max_grade,
-			COUNT(*) FILTER (WHERE pd.preferred = 2) AS p2_count,
-			MIN(pd.grade_num) FILTER (WHERE pd.preferred = 2) AS p2_min_grade,
-			PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY pd.grade_num) FILTER (WHERE pd.preferred = 2) AS p2_median_grade,
-			MAX(pd.grade_num) FILTER (WHERE pd.preferred = 2) AS p2_max_grade,
+			c.coursename,
+			p.preferred,
 			ic.division,
 			ic.min_intake,
 			ic.max_intake,
 			COALESCE(ic.total_allocations, 0) AS total_allocations,
-			COALESCE(NULLIF(ic.allocation_status, ''), 'Pending') AS allocation_status
-		FROM public.instance_courses ic
+			sar.grade
+		FROM public.preferences p
+		JOIN public.instance_courses ic ON p.instance_course_id = ic.id
 		JOIN public.instances i ON i.id = ic.instance_id
-		JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
-			AND CAST(c.semester AS INTEGER) = i.semester
-		LEFT JOIN preference_data pd ON pd.instance_course_id = ic.id
-		WHERE ic.instance_id = $1
-		GROUP BY ic.id, c.coursename, ic.coursecode, ic.division, ic.min_intake, ic.max_intake, ic.total_allocations, ic.allocation_status
-		${strictCourseFilterClause}
+		JOIN public.courses c ON UPPER(ic.coursecode) = UPPER(c.coursecode)
+		JOIN public.students s ON p.usn = s.usn
+		${sarJoinType} public.student_academic_records sar
+			ON s.usn = sar.usn
+			AND CAST(sar.semester AS INTEGER) = CAST(c.semester AS INTEGER)
+		WHERE i.id = $1
 		ORDER BY c.coursename ASC, ic.coursecode ASC`,
 		[instanceId]
 		),
@@ -363,10 +357,45 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 		 allPreferencesByCourse.get(key).add(prefNum);
 	 }
 
-	 const rows = detailsResult.rows.map((row) => {
-		 const key = row.instance_course_id;
+	 const statsByCourse = new Map();
+	 for (const row of detailsResult.rows) {
+		 const key = Number(row.instance_course_id);
+		 if (!statsByCourse.has(key)) {
+			 statsByCourse.set(key, {
+				 instance_course_id: key,
+				 coursename: row.coursename,
+				 coursecode: row.coursecode,
+				 division: Number(row.division) || 0,
+				 min_intake: Number(row.min_intake) || 0,
+				 max_intake: Number(row.max_intake) || 0,
+				 total_allocations: Number(row.total_allocations) || 0,
+				 allocation_status: row.allocation_status || 'Pending',
+				 preferences: new Map()
+			 });
+		 }
+
+		 const course = statsByCourse.get(key);
+		 const pref = Number(row.preferred);
+		 if (!Number.isFinite(pref)) {
+			 continue;
+		 }
+
+		 if (!course.preferences.has(pref)) {
+			 course.preferences.set(pref, []);
+		 }
+
+		 const gradeNum = row.grade == null || row.grade === '' ? null : Number(row.grade);
+		 if (gradeNum != null && Number.isFinite(gradeNum)) {
+			 course.preferences.get(pref).push(gradeNum);
+		 }
+	 }
+
+	 const rows = Array.from(statsByCourse.values()).map((course) => {
+		 const p1Grades = course.preferences.get(1) || [];
+		 const p2Grades = course.preferences.get(2) || [];
+
+		 const key = course.instance_course_id;
 		 const rangeMap = chartByCourse.get(key) || new Map();
-		 // Get all unique preferences for this course, sorted
 		 const chartLabels = Array.from(allPreferencesByCourse.get(key) || []).sort((a, b) => a - b);
 		 const chartData = Array.from(rangeMap.entries()).map(([gradeRange, preferences], index) => ({
 			 label: gradeRange,
@@ -376,23 +405,34 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 			 borderWidth: 1
 		 }));
 
+		 const p1Count = p1Grades.length;
+		 const p2Count = p2Grades.length;
+		 const p1Min = p1Count > 0 ? Math.min(...p1Grades) : null;
+		 const p1Max = p1Count > 0 ? Math.max(...p1Grades) : null;
+		 const p2Min = p2Count > 0 ? Math.min(...p2Grades) : null;
+		 const p2Max = p2Count > 0 ? Math.max(...p2Grades) : null;
+		 const p1Median = calculateMedian(p1Grades);
+		 const p2Median = calculateMedian(p2Grades);
+
 		 return {
-			 coursename: row.coursename,
-			 coursecode: row.coursecode,
-			 instance_course_id: row.instance_course_id,
-			 p1_count: Number(row.p1_count) || 0,
-			 p2_count: Number(row.p2_count) || 0,
-			 p1_min_grade: row.p1_min_grade != null ? Number(row.p1_min_grade) : null,
-			 p2_min_grade: row.p2_min_grade != null ? Number(row.p2_min_grade) : null,
-			 p1_max_grade: row.p1_max_grade != null ? Number(row.p1_max_grade) : null,
-			 p2_max_grade: row.p2_max_grade != null ? Number(row.p2_max_grade) : null,
-			 p1_median_grade: row.p1_median_grade != null ? Number(row.p1_median_grade) : null,
-			 p2_median_grade: row.p2_median_grade != null ? Number(row.p2_median_grade) : null,
-			 division: Number(row.division) || 0,
-			 min_intake: Number(row.min_intake) || 0,
-			 max_intake: Number(row.max_intake) || 0,
-			 total_allocations: Number(row.total_allocations) || 0,
-			 allocation_status: row.allocation_status || 'Pending',
+			 coursename: course.coursename,
+			 coursecode: course.coursecode,
+			 instance_course_id: course.instance_course_id,
+			 p1_count: p1Count,
+			 p2_count: p2Count,
+			 p1_min_grade: p1Min,
+			 p2_min_grade: p2Min,
+			 p1_max_grade: p1Max,
+			 p2_max_grade: p2Max,
+			 p1_median_grade: p1Median,
+			 p2_median_grade: p2Median,
+			 p1_medium_grade: p1Median,
+			 p2_medium_grade: p2Median,
+			 division: course.division,
+			 min_intake: course.min_intake,
+			 max_intake: course.max_intake,
+			 total_allocations: course.total_allocations,
+			 allocation_status: course.allocation_status,
 			 chartLabels,
 			 chartData
 		 };

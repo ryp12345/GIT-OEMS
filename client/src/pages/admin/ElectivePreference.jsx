@@ -12,8 +12,17 @@ import {
 } from '../../api/instance.api';
 
 function formatGrade(value) {
-	if (value == null || Number.isNaN(Number(value))) return '-';
+  if (value == null || Number.isNaN(Number(value))) return '';
 	return Number(value).toFixed(2);
+}
+
+function getFirstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function toCsvCell(value) {
@@ -481,10 +490,15 @@ export default function ElectivePreferencePage() {
 
                         // Build per-preference stats from current API shape (p1_*, p2_*)
                         const getPreferenceCell = (pref) => {
-                          const count = row[`p${pref}_count`];
-                          const min = row[`p${pref}_min_grade`];
-                          const median = row[`p${pref}_median_grade`];
-                          const max = row[`p${pref}_max_grade`];
+                          const count = getFirstDefined(row[`p${pref}_count`], row[`p${pref}_cnt`]);
+                          const min = getFirstDefined(row[`p${pref}_min_grade`], row[`p${pref}_min`]);
+                          const median = getFirstDefined(
+                            row[`p${pref}_median_grade`],
+                            row[`p${pref}_medium_grade`],
+                            row[`p${pref}_median`],
+                            row[`p${pref}_medium`]
+                          );
+                          const max = getFirstDefined(row[`p${pref}_max_grade`], row[`p${pref}_max`]);
 
                           // Backward compatibility if older API sends row.preferences
                           if (
@@ -496,10 +510,15 @@ export default function ElectivePreferencePage() {
                           ) {
                             const legacy = row.preferences.find((p) => Number(p.prefIndex) === pref) || {};
                             return {
-                              count: legacy.count,
-                              min_grade: legacy.min_grade,
-                              median_grade: legacy.median_grade,
-                              max_grade: legacy.max_grade
+                              count: getFirstDefined(legacy.count, legacy.total),
+                              min_grade: getFirstDefined(legacy.min_grade, legacy.min),
+                              median_grade: getFirstDefined(
+                                legacy.median_grade,
+                                legacy.medium_grade,
+                                legacy.median,
+                                legacy.medium
+                              ),
+                              max_grade: getFirstDefined(legacy.max_grade, legacy.max)
                             };
                           }
 

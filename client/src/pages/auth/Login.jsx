@@ -155,9 +155,9 @@ export default function Login() {
             {isSubmitting ? 'Loading...' : 'Login'}
           </button>
 
-          <div className="mt-2 text-center">
+          {/* <div className="mt-2 text-center">
             <p className="text-sm text-slate-500">Forgot password?</p>
-          </div>
+          </div> */}
           
         </form>
       </div>
