@@ -51,6 +51,7 @@ export default function AuthProvider({ children }) {
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('oems_user');
+    localStorage.removeItem('oems_admin_active_instance');
     setToken(null);
     setUser(null);
   };

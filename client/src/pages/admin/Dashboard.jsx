@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
 import Notification from '../../components/common/Notification';
+import { useAdminInstance } from '../../context/AdminInstanceContext';
 import {
 	getInstances,
+	getInstanceView,
 	getPreferenceFormStatus,
 	getPreferenceStatistics,
 	setPreferenceFormStatus
@@ -15,6 +17,7 @@ import { getStudents } from '../../api/student.api';
 export default function AdminDashboard() {
 	const token = localStorage.getItem('token');
 	const navigate = useNavigate();
+	const { activeInstance, activeInstanceId, hasActiveInstance } = useAdminInstance();
 
 	function isFormEnabled(value) {
 		if (value === true || value === 1) return true;
@@ -32,9 +35,9 @@ export default function AdminDashboard() {
 	}
 
 	const [instances, setInstances] = useState([]);
-	const [courses, setCourses] = useState([]);
 	const [students, setStudents] = useState([]);
 	const [allStats, setAllStats] = useState({});
+	const [instanceCourses, setInstanceCourses] = useState([]);
 
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState('');
@@ -58,9 +61,8 @@ export default function AdminDashboard() {
 			setIsLoading(true);
 			setError('');
 
-			const [instancesRes, coursesRes, studentsRes] = await Promise.all([
+			const [instancesRes, studentsRes] = await Promise.all([
 				getInstances(token),
-				getCourses(token),
 				getStudents(token)
 			]);
 
@@ -73,11 +75,6 @@ export default function AdminDashboard() {
 				...instance,
 				form_enabled: isFormEnabled(instance.status)
 			}));
-			const coursesData = Array.isArray(coursesRes?.data?.data)
-				? coursesRes.data.data
-				: Array.isArray(coursesRes?.data)
-					? coursesRes.data
-					: [];
 			const studentsData = Array.isArray(studentsRes?.data?.data)
 				? studentsRes.data.data
 				: Array.isArray(studentsRes?.data)
@@ -85,7 +82,6 @@ export default function AdminDashboard() {
 					: [];
 
 			setInstances(normalizedInstances);
-			setCourses(coursesData);
 			setStudents(studentsData);
 
 			const perInstanceStats = {};
@@ -106,11 +102,25 @@ export default function AdminDashboard() {
 		} catch (requestError) {
 			setError(requestError?.response?.data?.error || 'Unable to load dashboard');
 			setInstances([]);
-			setCourses([]);
 			setStudents([]);
 			setAllStats({});
 		} finally {
 			setIsLoading(false);
+		}
+	}
+
+	async function loadInstanceCourses(instanceId) {
+		if (!instanceId) {
+			setInstanceCourses([]);
+			return;
+		}
+
+		try {
+			const response = await getInstanceView(instanceId, token);
+			const data = response?.data?.data || response?.data || {};
+			setInstanceCourses(Array.isArray(data?.courses) ? data.courses : []);
+		} catch (_requestError) {
+			setInstanceCourses([]);
 		}
 	}
 
@@ -212,12 +222,29 @@ export default function AdminDashboard() {
 		setSelectedInstanceId(String(instanceId));
 		if (instanceId) {
 			const numericId = Number(instanceId);
-			await Promise.all([loadChartData(numericId), loadTableData(numericId)]);
+			await Promise.all([
+				loadChartData(numericId),
+				loadTableData(numericId),
+				loadInstanceCourses(numericId)
+			]);
 		} else {
 			setPreferenceStats([]);
 			setChartStats([]);
+			setInstanceCourses([]);
 		}
 	}
+
+	useEffect(() => {
+		if (!activeInstanceId) {
+			setSelectedInstanceId('');
+			setPreferenceStats([]);
+			setChartStats([]);
+			setInstanceCourses([]);
+			return;
+		}
+
+		handleInstanceSelectionForStats(activeInstanceId);
+	}, [activeInstanceId]);
 
 	const enabledPreferenceForms = useMemo(
 		() => instances.filter((instance) => Boolean(instance.form_enabled)).length,
@@ -259,31 +286,40 @@ export default function AdminDashboard() {
 		[preferenceStats]
 	);
 
+	const studentsInActiveInstance = useMemo(() => {
+		if (!hasActiveInstance) return 0;
+		const semester = String(activeInstance?.semester || '').trim();
+		const usnSet = new Set(
+			students
+				.filter((student) => String(student.semester || '').trim() === semester)
+				.map((student) => String(student.usn || '').trim().toUpperCase())
+				.filter(Boolean)
+		);
+		return usnSet.size;
+	}, [students, hasActiveInstance, activeInstance]);
+
+	const coursesInActiveInstance = useMemo(() => (
+		hasActiveInstance ? instanceCourses.length : 0
+	), [instanceCourses, hasActiveInstance]);
+
 	const displayStats = [
 		{
-			label: 'Total Students',
-			value: students.length,
+			label: 'Students In Selected Instance',
+			value: studentsInActiveInstance,
 			icon: 'ion-person-stalker',
 			color: 'bg-sky-600'
 		},
 		{
-			label: 'Total Courses',
-			value: courses.length,
+			label: 'Courses Floated In Selected Instance',
+			value: coursesInActiveInstance,
 			icon: 'ion-university',
 			color: 'bg-indigo-600'
 		},
 		{
-			label: 'Active Instances',
-			value: activeInstances,
+			label: 'Students Registered Preferences',
+			value: selectedTotals.submitted,
 			icon: 'ion-ios-pulse-strong',
 			color: 'bg-emerald-600'
-		},
-		{
-			label: 'Forms Enabled',
-			value: enabledPreferenceForms,
-			icon: 'ion-checkmark-circled',
-			color: 'bg-amber-600',
-			clickable: true
 		}
 	];
 
@@ -310,6 +346,16 @@ export default function AdminDashboard() {
 							<div className="p-3 rounded border border-red-200 text-red-700 bg-red-50 text-sm">{error}</div>
 						)}
 
+						{hasActiveInstance ? (
+							<div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+								Active Instance: {activeInstance?.instancename || '-'} ({activeInstance?.academic_year || '-'}, Sem {activeInstance?.semester || '-'})
+							</div>
+						) : (
+							<div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+								Please select an elective instance from Elective Instance page.
+							</div>
+						)}
+
 						{isLoading ? (
 							<div className="bg-white rounded-lg shadow p-8 text-center text-slate-500">Loading dashboard data...</div>
 						) : (
@@ -318,8 +364,7 @@ export default function AdminDashboard() {
 									{displayStats.map((stat) => (
 										<div
 											key={stat.label}
-											className={`${stat.color} rounded-xl shadow-lg p-5 text-white ${stat.clickable ? 'cursor-pointer hover:shadow-xl' : ''} transition`}
-											onClick={() => stat.clickable && openPreferenceFormModal()}
+												className={`${stat.color} rounded-xl shadow-lg p-5 text-white transition`}
 										>
 											<div className="flex items-start justify-between gap-3">
 												<div>
@@ -340,16 +385,16 @@ export default function AdminDashboard() {
 											<p className="text-2xl font-bold text-sky-900">{instances.length}</p>
 										</div>
 										<div className="rounded-lg p-4 bg-emerald-50 border border-emerald-200">
-											<p className="text-sm text-emerald-700">Submitted</p>
-											<p className="text-2xl font-bold text-emerald-900">{overallTotals.submitted}</p>
+											<p className="text-sm text-emerald-700">Registered</p>
+											<p className="text-2xl font-bold text-emerald-900">{selectedTotals.submitted}</p>
 										</div>
 										<div className="rounded-lg p-4 bg-amber-50 border border-amber-200">
 											<p className="text-sm text-amber-700">Pending</p>
-											<p className="text-2xl font-bold text-amber-900">{overallTotals.pending}</p>
+											<p className="text-2xl font-bold text-amber-900">{selectedTotals.pending}</p>
 										</div>
 										<div className="rounded-lg p-4 bg-indigo-50 border border-indigo-200">
 											<p className="text-sm text-indigo-700">Completion</p>
-											<p className="text-2xl font-bold text-indigo-900">{overallTotals.completionPercent}%</p>
+											<p className="text-2xl font-bold text-indigo-900">{selectedTotals.total > 0 ? ((selectedTotals.submitted / selectedTotals.total) * 100).toFixed(1) : '0.0'}%</p>
 										</div>
 									</div>
 								</div>
@@ -523,7 +568,7 @@ export default function AdminDashboard() {
 											</div>
 										) : (
 											<div className="h-56 flex items-center justify-center bg-slate-50 rounded-lg">
-												<p className="text-slate-500">Select an instance to view chart data</p>
+													<p className="text-slate-500">{hasActiveInstance ? 'No chart data available for this instance' : 'Select an active instance to view chart data'}</p>
 											</div>
 										)}
 									</div>
@@ -531,19 +576,10 @@ export default function AdminDashboard() {
 									<div className="bg-white rounded-xl shadow-lg p-6">
 										<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
 											<h2 className="text-xl font-semibold text-slate-900">Student Preference Status</h2>
-											<div className="w-full sm:w-72">
-												<select
-													value={String(selectedInstanceId)}
-													onChange={(event) => handleInstanceSelectionForStats(event.target.value)}
-													className="block w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm"
-												>
-													<option value="">Select Elective Instance</option>
-													{instances.map((instance) => (
-														<option key={instance.id} value={String(instance.id)}>
-															{instance.instancename} ({instance.academic_year}, Sem {instance.semester})
-														</option>
-													))}
-												</select>
+											<div className="w-full sm:w-auto rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+												{hasActiveInstance
+													? `${activeInstance?.instancename || '-'} (${activeInstance?.academic_year || '-'}, Sem ${activeInstance?.semester || '-'})`
+													: 'No active instance selected'}
 											</div>
 										</div>
 
@@ -580,10 +616,10 @@ export default function AdminDashboard() {
 													</tfoot>
 												</table>
 											</div>
-										) : selectedInstanceId ? (
+										) : hasActiveInstance ? (
 											<div className="py-12 text-center text-sm text-slate-500">No preference data available for this instance</div>
 										) : (
-											<div className="py-12 text-center text-sm text-slate-500">Select an instance to view preference statistics</div>
+											<div className="py-12 text-center text-sm text-slate-500">Select an active instance to view preference statistics</div>
 										)}
 									</div>
 								</div>

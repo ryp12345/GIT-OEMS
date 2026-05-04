@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
+import { useAdminInstance } from '../../context/AdminInstanceContext';
 import {
-	getInstances,
 	getPreferenceStatisticsDetails,
 	resetInstanceAllocations,
 	setFinalPreferences,
@@ -14,8 +14,7 @@ import {
 
 export default function AllocationPage() {
 	const token = localStorage.getItem('token');
-	const [instances, setInstances] = useState([]);
-	const [selectedInstance, setSelectedInstance] = useState('#');
+	const { activeInstance, activeInstanceId, hasActiveInstance } = useAdminInstance();
 	const [courses, setCourses] = useState([]);
 	const [loading, setLoading] = useState(false);
 	const [step, setStep] = useState('initial');
@@ -30,34 +29,25 @@ export default function AllocationPage() {
 		return Array.isArray(payload?.rows) ? payload.rows : [];
 	}
 
-	useEffect(() => {
-		(async () => {
-			try {
-				const res = await getInstances(token);
-				setInstances(Array.isArray(res?.data) ? res.data : []);
-			} catch (err) {
-				setResultType('error');
-				setResultMessage('Failed to load instances');
-			}
-		})();
-	}, [token]);
-
-	function resetStateForInstanceChange(value) {
-		setSelectedInstance(value);
+	function resetStateForInstanceChange() {
 		setStep('initial');
 		setCourses([]);
 		setRejectedCourses([]);
 		setResultMessage('');
 	}
 
+	useEffect(() => {
+		resetStateForInstanceChange();
+	}, [activeInstanceId]);
+
 	async function handleStart() {
-		if (!selectedInstance || selectedInstance === '#') return;
+		if (!activeInstanceId) return;
 
 		setLoading(true);
 		setResultMessage('');
 		try {
-			await setFinalPreferences(selectedInstance, token);
-			const rejectRes = await rejectUnderSubscribedCourses(selectedInstance, token);
+			await setFinalPreferences(activeInstanceId, token);
+			const rejectRes = await rejectUnderSubscribedCourses(activeInstanceId, token);
 			const rejected = Array.isArray(rejectRes?.data?.rejectedCourses) ? rejectRes.data.rejectedCourses : [];
 
 			const ids = rejected
@@ -68,7 +58,7 @@ export default function AllocationPage() {
 
 			if (rejected.length > 0) {
 				const rejectedNames = rejected.map((c) => c.coursecode).join(', ');
-				await upgradePreferences(selectedInstance, ids, token);
+				await upgradePreferences(activeInstanceId, ids, token);
 				setResultType('success');
 				setResultMessage(`Rejected ${rejectedNames}. Preferences are Upgraded Successfully.`);
 			} else {
@@ -76,7 +66,7 @@ export default function AllocationPage() {
 				setResultMessage('No courses were rejected. Ready to allocate.');
 			}
 
-			const detailsRes = await getPreferenceStatisticsDetails(selectedInstance, token);
+			const detailsRes = await getPreferenceStatisticsDetails(activeInstanceId, token);
 			const data = parsePreferenceDetailsPayload(detailsRes?.data);
 			setCourses(data);
 			setStep('allocating');
@@ -89,7 +79,7 @@ export default function AllocationPage() {
 	}
 
 	async function handleAllocate() {
-		if (!selectedInstance || selectedInstance === '#') return;
+		if (!activeInstanceId) return;
 
 		const confirmed = window.confirm('This will run the allocation process. Proceed?');
 		if (!confirmed) return;
@@ -97,12 +87,12 @@ export default function AllocationPage() {
 		setLoading(true);
 		setResultMessage('');
 		try {
-			await allocateByStep(selectedInstance, token);
+			await allocateByStep(activeInstanceId, token);
 			setResultType('success');
 			setResultMessage('Allocation completed successfully.');
 			setStep('completed');
 
-			const courseRes = await getPreferenceStatisticsDetails(selectedInstance, token);
+			const courseRes = await getPreferenceStatisticsDetails(activeInstanceId, token);
 			const courseData = parsePreferenceDetailsPayload(courseRes?.data);
 			setCourses(courseData);
 		} catch (err) {
@@ -114,13 +104,13 @@ export default function AllocationPage() {
 	}
 
 	async function handleDownload() {
-		if (!selectedInstance || selectedInstance === '#') return;
+		if (!activeInstanceId) return;
 		try {
-			const res = await downloadInstanceAllocations(selectedInstance, token);
+			const res = await downloadInstanceAllocations(activeInstanceId, token);
 			const url = window.URL.createObjectURL(new Blob([res.data], { type: res.headers['content-type'] }));
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `student_allocations_${selectedInstance}.xlsx`;
+			a.download = `student_allocations_${activeInstanceId}.xlsx`;
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
@@ -132,14 +122,14 @@ export default function AllocationPage() {
 	}
 
 	async function handleReset() {
-		if (!selectedInstance || selectedInstance === '#') return;
+		if (!activeInstanceId) return;
 
 		const confirmed = window.confirm('Reset allocations for this instance?');
 		if (!confirmed) return;
 
 		setLoading(true);
 		try {
-			await resetInstanceAllocations(selectedInstance, token);
+			await resetInstanceAllocations(activeInstanceId, token);
 			setStep('initial');
 			setRejectedCourses([]);
 			setCourses([]);
@@ -172,28 +162,17 @@ export default function AllocationPage() {
 						</div>
 
 						<div className="mb-6 flex flex-col gap-4 rounded-xl bg-white p-5 shadow-xl lg:flex-row lg:items-end lg:justify-between">
-							<div className="w-full max-w-md">
-								<label className="block text-sm font-semibold text-blue-700">Elective Instance</label>
-								<select
-									value={selectedInstance}
-									onChange={(e) => resetStateForInstanceChange(e.target.value)}
-									disabled={loading}
-									className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm"
-								>
-									<option value="#">Select Elective Instance</option>
-									{instances.map((ins) => (
-										<option key={ins.id} value={ins.id}>
-											{`${ins.instancename} - ${ins.academic_year} (Sem ${ins.semester})`}
-										</option>
-									))}
-								</select>
+							<div className="w-full max-w-3xl rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+								{hasActiveInstance
+									? `Active Instance: ${activeInstance?.instancename || '-'} (${activeInstance?.academic_year || '-'}, Sem ${activeInstance?.semester || '-'})`
+									: 'No active instance selected. Please select an instance from Elective Instance page.'}
 							</div>
 
 							<div className="flex flex-wrap gap-2">
 								{step === 'initial' && (
 									<button
 										onClick={handleStart}
-										disabled={selectedInstance === '#' || loading}
+										disabled={!hasActiveInstance || loading}
 										className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:opacity-50"
 									>
 										{loading ? 'Starting...' : 'Start'}
@@ -203,7 +182,7 @@ export default function AllocationPage() {
 								{(step === 'allocating' || step === 'completed') && (
 									<button
 										onClick={handleAllocate}
-										disabled={loading}
+										disabled={!hasActiveInstance || loading}
 										className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 disabled:opacity-50"
 									>
 										{loading ? 'Allocating...' : 'Allocate'}
@@ -213,7 +192,7 @@ export default function AllocationPage() {
 								{step === 'completed' && (
 									<button
 										onClick={handleDownload}
-										disabled={loading}
+										disabled={!hasActiveInstance || loading}
 										className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-emerald-700 disabled:opacity-50"
 									>
 										Download Excel
@@ -223,7 +202,7 @@ export default function AllocationPage() {
 								{step !== 'initial' && (
 									<button
 										onClick={handleReset}
-										disabled={loading}
+										disabled={!hasActiveInstance || loading}
 										className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-red-700 disabled:opacity-50"
 									>
 										Reset
@@ -275,7 +254,7 @@ export default function AllocationPage() {
 										{courses.length === 0 ? (
 											<tr>
 													<td colSpan={15} className="px-4 py-8 text-center text-sm text-slate-500">
-													No data. Select an instance and click Start.
+														{hasActiveInstance ? 'No data. Click Start to load this instance.' : 'Please select an active instance in Elective Instance page.'}
 												</td>
 											</tr>
 										) : (

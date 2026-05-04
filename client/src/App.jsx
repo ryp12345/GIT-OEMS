@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import AuthProvider from './context/AuthContext';
+import AdminInstanceProvider from './context/AdminInstanceContext';
 import Login from './pages/auth/Login';
 import ChangePassword from './pages/auth/ChangePassword';
 import CoursesPage from './pages/admin/Courses';
@@ -20,8 +21,9 @@ import ProtectedRoute from './routes/ProtectedRoute';
 export default function App(){
 	return (
 		<AuthProvider>
-			<BrowserRouter>
-				   <Routes>
+			<AdminInstanceProvider>
+				<BrowserRouter>
+					   <Routes>
 					   <Route path="/login" element={<Login/>} />
 					   <Route path="/student/registration" element={<StudentRegistrationPage />} />
 					   <Route path="/student/check" element={<CheckNamePage />} />
@@ -54,8 +56,9 @@ export default function App(){
 					   </Route>
 
 					   <Route path="/" element={<Navigate to="/login" replace />} />
-				   </Routes>
-			</BrowserRouter>
+					   </Routes>
+				</BrowserRouter>
+			</AdminInstanceProvider>
 		</AuthProvider>
 	);
 }

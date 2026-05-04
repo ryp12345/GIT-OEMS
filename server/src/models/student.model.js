@@ -96,6 +96,20 @@ async function getLatestAcademicRecordByUsn(usn) {
 	return result.rows[0] || null;
 }
 
+async function getAcademicRecordByUsnAndSemester(usn, semester) {
+	const result = await pool.query(
+		`SELECT id, usn, semester, grade
+		 FROM public.student_academic_records
+		 WHERE UPPER(usn) = UPPER($1)
+		   AND CAST(semester AS INTEGER) = $2
+		 ORDER BY updated_at DESC NULLS LAST, id DESC
+		 LIMIT 1`,
+		[usn, Number(semester)]
+	);
+
+	return result.rows[0] || null;
+}
+
 async function createAcademicRecord({ usn, semester, cgpa }) {
 	await pool.query(
 		`INSERT INTO public.student_academic_records (
@@ -179,6 +193,25 @@ async function findStudentByField(field, value, excludedId = null) {
 	return result.rows[0] || null;
 }
 
+async function findStudentsForImport({ email, uid, usn }) {
+	const result = await pool.query(
+		`SELECT id,
+				name,
+				email,
+				uid,
+				usn,
+				department_id
+		 FROM public.students
+		 WHERE UPPER(email) = UPPER($1)
+		    OR UPPER(uid) = UPPER($2)
+		    OR UPPER(usn) = UPPER($3)
+		 ORDER BY id ASC`,
+		[email, uid, usn]
+	);
+
+	return result.rows;
+}
+
 async function listDepartments() {
 	const result = await pool.query(
 		`SELECT deptid AS id, name, shortname
@@ -201,11 +234,13 @@ module.exports = {
 	updateStudent,
 	deleteStudent,
 	getLatestAcademicRecordByUsn,
+	getAcademicRecordByUsnAndSemester,
 	createAcademicRecord,
 	updateAcademicRecord,
 	updateAcademicRecordUsn,
 	deleteAcademicRecordsByUsn,
 	findStudentByField,
+	findStudentsForImport,
 	listDepartments,
 	departmentExists
 };

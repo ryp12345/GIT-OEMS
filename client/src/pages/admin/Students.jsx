@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
 import Notification from '../../components/common/Notification';
+import { useAdminInstance } from '../../context/AdminInstanceContext';
 import {
 	createStudent,
 	deleteStudent,
@@ -39,9 +40,13 @@ function normalizeFormState(formState) {
 
 export default function StudentsPage() {
 	const token = localStorage.getItem('token');
+	const { activeInstance, hasActiveInstance } = useAdminInstance();
 	const [students, setStudents] = useState([]);
 	const [departments, setDepartments] = useState([]);
 	const [search, setSearch] = useState('');
+	const [semesterFilter, setSemesterFilter] = useState('');
+	const [departmentFilter, setDepartmentFilter] = useState('');
+	const [sortOrder, setSortOrder] = useState('latest_added');
 	const [isModalOpen, setIsModalOpen] = useState(false);
 	const [formState, setFormState] = useState(initialFormState);
 	const [editingId, setEditingId] = useState(null);
@@ -290,9 +295,21 @@ export default function StudentsPage() {
 
 	const filtered = useMemo(() => {
 		const query = search.trim().toLowerCase();
-		if (!query) return students;
+		const effectiveSemesterFilter = hasActiveInstance
+			? String(activeInstance?.semester || '')
+			: semesterFilter;
+		const filteredStudents = students.filter((student) => {
+			if (effectiveSemesterFilter && String(student.semester || '') !== effectiveSemesterFilter) {
+				return false;
+			}
 
-		return students.filter((student) => (
+			if (departmentFilter && String(student.department_id || '') !== departmentFilter) {
+				return false;
+			}
+
+			if (!query) return true;
+
+			return (
 			student.name?.toLowerCase().includes(query)
 			|| student.email?.toLowerCase().includes(query)
 			|| student.uid?.toLowerCase().includes(query)
@@ -301,8 +318,27 @@ export default function StudentsPage() {
 			|| String(student.cgpa || '').toLowerCase().includes(query)
 			|| student.department_name?.toLowerCase().includes(query)
 			|| student.department_shortname?.toLowerCase().includes(query)
-		));
-	}, [students, search]);
+			);
+		});
+
+		return [...filteredStudents].sort((left, right) => {
+			if (sortOrder === 'name_asc') {
+				return (left.name || '').localeCompare(right.name || '');
+			}
+
+			const leftTimestamp = new Date(left.created_at || 0).getTime() || 0;
+			const rightTimestamp = new Date(right.created_at || 0).getTime() || 0;
+			if (leftTimestamp !== rightTimestamp) {
+				return sortOrder === 'oldest_added'
+					? leftTimestamp - rightTimestamp
+					: rightTimestamp - leftTimestamp;
+			}
+
+			return sortOrder === 'oldest_added'
+				? Number(left.id || 0) - Number(right.id || 0)
+				: Number(right.id || 0) - Number(left.id || 0);
+		});
+	}, [students, search, semesterFilter, departmentFilter, sortOrder, hasActiveInstance, activeInstance]);
 
 	const paginated = useMemo(() => {
 		const start = (page - 1) * PAGE_SIZE;
@@ -322,7 +358,7 @@ export default function StudentsPage() {
 
 	useEffect(() => {
 		setPage(1);
-	}, [search, students]);
+	}, [search, semesterFilter, departmentFilter, sortOrder, students]);
 
 	return (
 		<div className="flex h-screen bg-slate-100">
@@ -344,16 +380,53 @@ export default function StudentsPage() {
 						</div>
 
 						<div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
-							<div className="relative w-full sm:w-80">
-								<input
-									value={search}
-									onChange={(event) => setSearch(event.target.value)}
-									placeholder="Search students..."
-									className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-								/>
-								<svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-								</svg>
+							<div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-4">
+								{hasActiveInstance ? (
+									<div className="sm:col-span-2 xl:col-span-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900">
+										Active Instance: {activeInstance?.instancename || '-'} ({activeInstance?.academic_year || '-'}, Sem {activeInstance?.semester || '-'})
+									</div>
+								) : null}
+								<div className="relative sm:col-span-2 xl:col-span-1">
+									<input
+										value={search}
+										onChange={(event) => setSearch(event.target.value)}
+										placeholder="Search students..."
+										className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+									/>
+									<svg xmlns="http://www.w3.org/2000/svg" className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+									</svg>
+								</div>
+								<select
+									value={hasActiveInstance ? String(activeInstance?.semester || '') : semesterFilter}
+									onChange={(event) => setSemesterFilter(event.target.value)}
+									disabled={hasActiveInstance}
+									className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+								>
+									{!hasActiveInstance ? <option value="">All semesters</option> : null}
+									{semesterOptions.map((semester) => (
+										<option key={semester} value={semester}>{semester} Semester</option>
+									))}
+								</select>
+								<select
+									value={departmentFilter}
+									onChange={(event) => setDepartmentFilter(event.target.value)}
+									className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+								>
+									<option value="">All departments</option>
+									{departments.map((department) => (
+										<option key={department.id} value={String(department.id)}>{department.name}</option>
+									))}
+								</select>
+								<select
+									value={sortOrder}
+									onChange={(event) => setSortOrder(event.target.value)}
+									className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+								>
+									<option value="latest_added">Latest added first</option>
+									<option value="oldest_added">Oldest added first</option>
+									<option value="name_asc">Name A-Z</option>
+								</select>
 							</div>
 							<div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
 								<button

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Notification from '../../components/common/Notification';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
+import { useAdminInstance } from '../../context/AdminInstanceContext';
 import {
 	createInstance,
 	deleteInstance,
@@ -44,6 +45,7 @@ function normalizeFormState(formState) {
 export default function ElectiveInstancePage() {
 	const token = localStorage.getItem('token');
 	const navigate = useNavigate();
+	const { activeInstanceId, selectInstance } = useAdminInstance();
 	const academicYearOptions = useMemo(() => getAcademicYearOptions(), []);
 	const [instances, setInstances] = useState([]);
 	const [search, setSearch] = useState('');
@@ -181,6 +183,11 @@ export default function ElectiveInstancePage() {
 		}
 	}
 
+	function handleUseInstance(instance) {
+		selectInstance(instance);
+		navigate('/dashboard');
+	}
+
 	const filtered = useMemo(() => {
 		const sorted = [...instances].sort((left, right) => (right.id || 0) - (left.id || 0));
 		const query = search.trim().toLowerCase();
@@ -285,13 +292,39 @@ export default function ElectiveInstancePage() {
 													<td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
 														<div className="flex items-center justify-center space-x-2">
 															<button
-																onClick={() => navigate(`/elective-instance/${instance.id}/view`)}
+																onClick={() => handleUseInstance(instance)}
+																className={`p-2 text-white transition-colors duration-200 rounded-lg ${String(activeInstanceId) === String(instance.id) ? 'bg-cyan-700 hover:bg-cyan-800' : 'bg-cyan-600 hover:bg-cyan-700'}`}
+																title="Use This Instance"
+															>
+																<svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"> <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /> <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /> </svg>
+															</button>
+															<button
+																onClick={() => {
+																	selectInstance(instance);
+																	navigate(`/elective-instance/${instance.id}/view`);
+																}}
 																className="p-2 text-white transition-colors duration-200 bg-emerald-600 rounded-lg hover:bg-emerald-700"
 																title="View Elective Instance"
 															>
-																<svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-																	<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-																	<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+																<svg
+																	xmlns="http://www.w3.org/2000/svg"
+																	className="w-4 h-4"
+																	fill="none"
+																	viewBox="0 0 16 16"
+																	stroke="currentColor"
+																	>
+																	<path
+																		strokeLinecap="round"
+																		strokeLinejoin="round"
+																		strokeWidth={2}
+																		d="M11.049 2.927c.3-1.14 1.603-1.14 1.902 0a1.724 1.724 0 002.573 1.066c1.01-.593 2.19.587 1.598 1.598a1.724 1.724 0 001.065 2.572c1.14.3 1.14 1.603 0 1.902a1.724 1.724 0 00-1.065 2.573c.592 1.01-.588 2.19-1.598 1.598a1.724 1.724 0 00-2.573 1.065c-.3 1.14-1.603 1.14-1.902 0a1.724 1.724 0 00-2.572-1.065c-1.01.592-2.19-.588-1.598-1.598a1.724 1.724 0 00-1.066-2.573c-1.14-.3-1.14-1.603 0-1.902a1.724 1.724 0 001.066-2.572c-.592-1.01.588-2.19 1.598-1.598a1.724 1.724 0 002.572-1.066z"
+																	/>
+																	<path
+																		strokeLinecap="round"
+																		strokeLinejoin="round"
+																		strokeWidth={2}
+																		d="M12 15a3 3 0 100-6 3 3 0 000 6z"
+																	/>
 																</svg>
 															</button>
 															<button

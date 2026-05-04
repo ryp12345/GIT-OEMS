@@ -4,8 +4,8 @@ import ChartDataLabels from 'chartjs-plugin-datalabels';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
 import Notification from '../../components/common/Notification';
+import { useAdminInstance } from '../../context/AdminInstanceContext';
 import {
-  getInstances,
   getPreferenceStatisticsDetails,
   resetInstanceAllocations,
   downloadInstanceAllocations
@@ -250,8 +250,7 @@ function StatisticsChartModal({ row, onClose }) {
 
 export default function ElectivePreferencePage() {
   const token = localStorage.getItem('token');
-  const [instances, setInstances] = useState([]);
-  const [selectedInstance, setSelectedInstance] = useState('#');
+  const { activeInstance, activeInstanceId, hasActiveInstance } = useAdminInstance();
   const [rows, setRows] = useState([]);
   const [grandTotalAllocations, setGrandTotalAllocations] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -298,19 +297,7 @@ export default function ElectivePreferencePage() {
   }
 
   useEffect(() => {
-    (async function loadInstances() {
-      try {
-        const res = await getInstances(token);
-        const data = res?.data || [];
-        setInstances(Array.isArray(data) ? data : []);
-      } catch (err) {
-        setError(err?.response?.data?.error || 'Unable to load instances');
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!selectedInstance || selectedInstance === '#') {
+    if (!activeInstanceId) {
       setRows([]);
       setGrandTotalAllocations(0);
       setActiveChartRow(null);
@@ -321,7 +308,7 @@ export default function ElectivePreferencePage() {
       try {
         setIsLoading(true);
         setError('');
-        const res = await getPreferenceStatisticsDetails(selectedInstance, token);
+        const res = await getPreferenceStatisticsDetails(activeInstanceId, token);
         applyPreferenceDetailsResponse(res?.data);
       } catch (err) {
         setError(err?.response?.data?.error || 'Unable to load elective preference details');
@@ -331,14 +318,14 @@ export default function ElectivePreferencePage() {
         setIsLoading(false);
       }
     })();
-  }, [selectedInstance]);
+  }, [activeInstanceId]);
 
   function showNotification(message, type = 'success') {
     setNotification({ show: true, message, type });
   }
 
   async function handleResetAllocations() {
-    if (!selectedInstance || selectedInstance === '#') return;
+    if (!activeInstanceId) return;
 
     const confirmed = window.confirm('Are you sure you want to reset all allocations? This action cannot be undone.');
     if (!confirmed) return;
@@ -346,10 +333,10 @@ export default function ElectivePreferencePage() {
     try {
       setIsResetting(true);
       setError('');
-      await resetInstanceAllocations(selectedInstance, token);
+      await resetInstanceAllocations(activeInstanceId, token);
       showNotification('Allocations reset successfully.', 'success');
 
-      const res = await getPreferenceStatisticsDetails(selectedInstance, token);
+      const res = await getPreferenceStatisticsDetails(activeInstanceId, token);
       applyPreferenceDetailsResponse(res?.data);
       setActiveChartRow(null);
     } catch (err) {
@@ -362,16 +349,16 @@ export default function ElectivePreferencePage() {
   }
 
   async function downloadExcel() {
-    if (!selectedInstance || selectedInstance === '#') {
-      showNotification('Please select an instance', 'error');
+    if (!activeInstanceId) {
+      showNotification('Please select an instance from Elective Instance page', 'error');
       return;
     }
     try {
-      const res = await downloadInstanceAllocations(selectedInstance, token);
+      const res = await downloadInstanceAllocations(activeInstanceId, token);
       const url = window.URL.createObjectURL(new Blob([res.data], { type: res.headers['content-type'] }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `student_allocations_${selectedInstance}.xlsx`;
+      a.download = `student_allocations_${activeInstanceId}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -382,7 +369,7 @@ export default function ElectivePreferencePage() {
     }
   }
 
-  const hasSelectedInstance = selectedInstance && selectedInstance !== '#';
+  const hasSelectedInstance = hasActiveInstance;
   // Dynamic preferences for table columns
   const allPreferences = useMemo(() => getAllPreferences(rows), [rows]);
 
@@ -406,27 +393,17 @@ export default function ElectivePreferencePage() {
             </div>
 
             <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div className="w-full max-w-md">
-                <label className="block text-sm font-semibold text-blue-700">Elective Instance</label>
-                <select
-                  value={selectedInstance}
-                  onChange={(event) => setSelectedInstance(event.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm"
-                >
-                  <option value="#">Select Elective Instance</option>
-                  {instances.map((instance) => (
-                    <option key={instance.id} value={instance.id}>
-                      {`${instance.instancename} - ${instance.academic_year} (Sem ${instance.semester})`}
-                    </option>
-                  ))}
-                </select>
+              <div className="w-full max-w-2xl rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                {hasSelectedInstance
+                  ? `Active Instance: ${activeInstance?.instancename || '-'} (${activeInstance?.academic_year || '-'}, Sem ${activeInstance?.semester || '-'})`
+                  : 'No active instance selected. Please select an instance from Elective Instance page.'}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={handleResetAllocations}
-                  disabled={selectedInstance === '#' || isResetting}
+                  disabled={!hasSelectedInstance || isResetting}
                   className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-red-700 disabled:opacity-50"
                 >
                   {isResetting ? 'Resetting...' : 'Reset Allocations'}
@@ -434,7 +411,7 @@ export default function ElectivePreferencePage() {
                 <button
                   type="button"
                   onClick={downloadExcel}
-                  disabled={selectedInstance === '#'}
+                  disabled={!hasSelectedInstance}
                   className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-emerald-700 disabled:opacity-50"
                 >
                   Download

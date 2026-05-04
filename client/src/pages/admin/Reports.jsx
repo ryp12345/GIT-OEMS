@@ -2,8 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
 import Notification from '../../components/common/Notification';
+import { useAdminInstance } from '../../context/AdminInstanceContext';
 import { 
-	getInstances, 
 	getPreferenceStatisticsDetails,
 	getPreferenceStatistics,
 	downloadInstanceAllocations
@@ -13,13 +13,12 @@ import { getStudents } from '../../api/student.api';
 
 export default function Reports() {
 	const token = localStorage.getItem('token');
+	const { activeInstance, activeInstanceId, hasActiveInstance } = useAdminInstance();
 
-	const [instances, setInstances] = useState([]);
 	const [courses, setCourses] = useState([]);
 	const [students, setStudents] = useState([]);
 	const [isLoading, setIsLoading] = useState(true);
 	const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
-	const [selectedInstanceId, setSelectedInstanceId] = useState('');
 	const [reportData, setReportData] = useState(null);
 
 	useEffect(() => {
@@ -27,25 +26,21 @@ export default function Reports() {
 	}, []);
 
 	useEffect(() => {
-		if (selectedInstanceId) {
-			loadReportData(selectedInstanceId);
+		if (activeInstanceId) {
+			loadReportData(activeInstanceId);
+		} else {
+			setReportData(null);
 		}
-	}, [selectedInstanceId]);
+	}, [activeInstanceId]);
 
 	async function loadInitialData() {
 		try {
 			setIsLoading(true);
-			const [instancesRes, coursesRes, studentsRes] = await Promise.all([
-				getInstances(token),
+			const [coursesRes, studentsRes] = await Promise.all([
 				getCourses(token),
 				getStudents(token)
 			]);
 
-			const instancesData = Array.isArray(instancesRes?.data?.data)
-				? instancesRes.data.data
-				: Array.isArray(instancesRes?.data)
-					? instancesRes.data
-					: [];
 			const coursesData = Array.isArray(coursesRes?.data?.data)
 				? coursesRes.data.data
 				: Array.isArray(coursesRes?.data)
@@ -57,13 +52,8 @@ export default function Reports() {
 					? studentsRes.data
 					: [];
 
-			setInstances(instancesData);
 			setCourses(coursesData);
 			setStudents(studentsData);
-
-			if (instancesData.length > 0) {
-				setSelectedInstanceId(String(instancesData[0].id));
-			}
 		} catch (error) {
 			showNotification('Failed to load report data', 'error');
 			console.error('Error loading initial data:', error);
@@ -105,13 +95,13 @@ export default function Reports() {
 	}
 
 	async function handleDownload() {
-		if (!selectedInstanceId) return;
+		if (!activeInstanceId) return;
 		try {
-			const res = await downloadInstanceAllocations(selectedInstanceId, token);
+			const res = await downloadInstanceAllocations(activeInstanceId, token);
 			const url = window.URL.createObjectURL(new Blob([res.data], { type: res.headers['content-type'] }));
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `student_allocations_${selectedInstanceId}.xlsx`;
+			a.download = `student_allocations_${activeInstanceId}.xlsx`;
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
@@ -171,24 +161,12 @@ export default function Reports() {
 							<>
 								<div className="bg-white rounded-xl shadow-lg p-6">
 <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end">
-									<div className="flex-1">
-										<label className="block text-sm font-medium text-slate-700 mb-2">
-											Select Elective Instance
-										</label>
-										<select
-											value={selectedInstanceId}
-											onChange={(e) => setSelectedInstanceId(e.target.value)}
-											className="block w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-										>
-											<option value="">Select an instance</option>
-											{instances.map((instance) => (
-												<option key={instance.id} value={String(instance.id)}>
-													{instance.instancename} ({instance.academic_year}, Sem {instance.semester})
-												</option>
-											))}
-										</select>
+									<div className="flex-1 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+										{hasActiveInstance
+											? `Active Instance: ${activeInstance?.instancename || '-'} (${activeInstance?.academic_year || '-'}, Sem ${activeInstance?.semester || '-'})`
+											: 'No active instance selected. Please select an instance from Elective Instance page.'}
 									</div>
-									{selectedInstanceId && (
+									{hasActiveInstance && (
 										<button
 											onClick={handleDownload}
 											className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700"
@@ -198,7 +176,7 @@ export default function Reports() {
 									)}
 									</div>
 
-									{selectedInstanceId && (
+									{hasActiveInstance && (
 										<>
 											<div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
 												<div className="rounded-lg p-4 bg-sky-50 border border-sky-200">
@@ -304,6 +282,12 @@ export default function Reports() {
 											</div>
 										</>
 									)}
+
+									{!hasActiveInstance ? (
+										<div className="py-12 text-center text-sm text-slate-500 bg-slate-50 rounded-lg">
+											Please select an active instance in Elective Instance page to view reports.
+										</div>
+									) : null}
 								</div>
 							</>
 						)}

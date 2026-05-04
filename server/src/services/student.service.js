@@ -194,6 +194,60 @@ function createLookupMap(items, accessors) {
 	return lookup;
 }
 
+function valuesMatch(left, right) {
+	return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+}
+
+async function resolveStudentForImport(student, rowNumber) {
+	const matches = await studentModel.findStudentsForImport(student);
+	if (matches.length === 0) {
+		await ensureUniqueStudentFields(student);
+		return studentModel.createStudent(student);
+	}
+
+	const distinctIds = [...new Set(matches.map((item) => item.id))];
+	if (distinctIds.length > 1) {
+		const error = new Error(`Row ${rowNumber}: email, UID, or USN match multiple existing students`);
+		error.statusCode = 409;
+		throw error;
+	}
+
+	const usnMatch = matches.find((item) => valuesMatch(item.usn, student.usn));
+	if (usnMatch) {
+		return studentModel.getStudentById(usnMatch.id);
+	}
+
+	const uidMatch = matches.find((item) => valuesMatch(item.uid, student.uid));
+	const emailMatch = matches.find((item) => valuesMatch(item.email, student.email));
+
+	if (uidMatch && emailMatch && uidMatch.id === emailMatch.id) {
+		return studentModel.getStudentById(uidMatch.id);
+	}
+
+	const error = new Error(`Row ${rowNumber}: existing student was found, but uploaded USN, UID, and email do not identify the same record`);
+	error.statusCode = 409;
+	throw error;
+
+}
+
+async function upsertAcademicRecord(student, semester, cgpa) {
+	const existingAcademicRecord = await studentModel.getAcademicRecordByUsnAndSemester(student.usn, semester);
+	if (existingAcademicRecord) {
+		await studentModel.updateAcademicRecord(existingAcademicRecord.id, {
+			usn: student.usn,
+			semester,
+			cgpa
+		});
+		return;
+	}
+
+	await studentModel.createAcademicRecord({
+		usn: student.usn,
+		semester,
+		cgpa
+	});
+}
+
 async function importStudentsFromFile(fileBuffer) {
 	const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
 	const firstSheetName = workbook.SheetNames[0];
@@ -275,10 +329,9 @@ async function importStudentsFromFile(fileBuffer) {
 		});
 
 		await ensureDepartmentExists(payload.department_id);
-		await ensureUniqueStudentFields(payload);
-		const createdStudent = await studentModel.createStudent(payload);
-		await studentModel.createAcademicRecord(payload);
-		importedStudents.push(await studentModel.getStudentById(createdStudent.id));
+		const student = await resolveStudentForImport(payload, rowNumber);
+		await upsertAcademicRecord(student, payload.semester, payload.cgpa);
+		importedStudents.push(await studentModel.getStudentById(student.id));
 	}
 
 	if (importedStudents.length === 0) {

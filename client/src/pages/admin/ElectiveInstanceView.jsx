@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
 import Notification from '../../components/common/Notification';
+import { useAdminInstance } from '../../context/AdminInstanceContext';
 import { getInstanceView, updateInstanceCourses } from '../../api/instance.api';
 
 function normalizeCourseRows(rows) {
@@ -21,6 +22,7 @@ export default function ElectiveInstanceViewPage() {
 	const { id } = useParams();
 	const navigate = useNavigate();
 	const token = localStorage.getItem('token');
+	const { selectInstance } = useAdminInstance();
 	const PAGE_SIZE = 10;
 	const [instance, setInstance] = useState(null);
 	const [departments, setDepartments] = useState([]);
@@ -43,6 +45,9 @@ export default function ElectiveInstanceViewPage() {
 			const response = await getInstanceView(id, token);
 			const data = response?.data?.data || response?.data || {};
 			setInstance(data.instance || null);
+			if (data.instance?.id) {
+				selectInstance(data.instance);
+			}
 			setDepartments(Array.isArray(data.departments) ? data.departments : []);
 			setCourses(normalizeCourseRows(data.courses));
 		} catch (requestError) {
