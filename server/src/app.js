@@ -12,10 +12,22 @@ const errorMiddleware = require('./middlewares/error.middleware');
 
 app.use(express.json());
 const isProduction = process.env.NODE_ENV === 'production';
-const allowedOrigins = (process.env.CORS_ORIGIN || '')
+const corsEnv = process.env.CORS_ORIGIN || process.env.CLIENT_URL || '';
+const allowedOrigins = corsEnv
 	.split(',')
-	.map((origin) => origin.trim())
+	.map((origin) => normalizeOrigin(origin))
 	.filter(Boolean);
+
+function normalizeOrigin(origin) {
+	return (origin || '').trim().replace(/\/+$/, '');
+}
+
+function getRequestOrigin(req) {
+	const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+	const host = req.headers['x-forwarded-host'] || req.get('host');
+	if (!protocol || !host) return '';
+	return normalizeOrigin(`${protocol}://${host}`);
+}
 
 function isPrivateDevOrigin(origin) {
 	try {
@@ -31,36 +43,52 @@ function isPrivateDevOrigin(origin) {
 	}
 }
 
-app.use(cors({
-	origin: function(origin, callback) {
-		if (!origin) {
-			callback(null, true);
-			return;
-		}
+app.use(cors(function(req, callback) {
+	const requestOrigin = normalizeOrigin(req.header('Origin'));
+	const sameSiteOrigin = getRequestOrigin(req);
 
-		if (allowedOrigins.includes('*')) {
-			callback(null, true);
-			return;
-		}
+	if (!requestOrigin) {
+		callback(null, { credentials: true, origin: true });
+		return;
+	}
 
-		if (allowedOrigins.length === 0) {
-			// In local/dev environments, allow any explicit frontend origin unless configured.
-			callback(null, true);
-			return;
-		}
+	if (allowedOrigins.includes('*')) {
+		callback(null, { credentials: true, origin: true });
+		return;
+	}
 
-		if (!isProduction && isPrivateDevOrigin(origin)) {
-			callback(null, true);
-			return;
-		}
+	if (!isProduction && allowedOrigins.length === 0) {
+		callback(null, { credentials: true, origin: true });
+		return;
+	}
 
-		if (allowedOrigins.includes(origin)) {
-			callback(null, true);
-		} else {
-			callback(new Error('Not allowed by CORS: ' + origin));
+	if (!isProduction && isPrivateDevOrigin(requestOrigin)) {
+		callback(null, { credentials: true, origin: true });
+		return;
+	}
+
+	// Check if origin matches allowed origins (with or without port)
+	const isAllowed = allowedOrigins.some(allowed => {
+		if (requestOrigin === allowed) return true;
+		// Also check if the origin domain matches (ignoring port)
+		try {
+			const reqUrl = new URL(requestOrigin);
+			const allowedUrl = new URL(allowed);
+			if (reqUrl.protocol === allowedUrl.protocol && reqUrl.hostname === allowedUrl.hostname) {
+				return true;
+			}
+		} catch (e) {
+			// Ignore URL parsing errors
 		}
-	},
-	credentials: true
+		return false;
+	});
+
+	if (isAllowed || requestOrigin === sameSiteOrigin) {
+		callback(null, { credentials: true, origin: true });
+		return;
+	}
+
+	callback(new Error('Not allowed by CORS: ' + requestOrigin));
 }));
 
 app.use('/api/auth', authRoutes);
