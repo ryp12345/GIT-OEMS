@@ -302,26 +302,38 @@ export default function AdminDashboard() {
 		hasActiveInstance ? instanceCourses.length : 0
 	), [instanceCourses, hasActiveInstance]);
 
-	const displayStats = [
-		{
-			label: 'Students In Selected Instance',
-			value: studentsInActiveInstance,
-			icon: 'ion-person-stalker',
-			color: 'bg-sky-600'
-		},
-		{
-			label: 'Courses Floated In Selected Instance',
-			value: coursesInActiveInstance,
-			icon: 'ion-university',
-			color: 'bg-indigo-600'
-		},
-		{
-			label: 'Students Registered Preferences',
-			value: selectedTotals.submitted,
-			icon: 'ion-ios-pulse-strong',
-			color: 'bg-emerald-600'
-		}
-	];
+	   const displayStats = [
+		   {
+			   label: 'Students In Selected Instance',
+			   value: studentsInActiveInstance,
+			   icon: 'ion-person-stalker',
+			   color: 'bg-sky-600'
+		   },
+		   {
+			   label: 'Courses Floated In Selected Instance',
+			   value: coursesInActiveInstance,
+			   icon: 'ion-university',
+			   color: 'bg-indigo-600'
+		   },
+		   {
+			   label: 'Students Registered Preferences',
+			   value: selectedTotals.submitted,
+			   icon: 'ion-ios-pulse-strong',
+			   color: 'bg-emerald-600'
+		   },
+		   {
+			   label: 'Pending',
+			   value: selectedTotals.pending,
+			   icon: 'ion-alert-circled',
+			   color: 'bg-amber-600'
+		   },
+		   {
+			   label: 'Completion',
+			   value: selectedTotals.total > 0 ? ((selectedTotals.submitted / selectedTotals.total) * 100).toFixed(1) + '%' : '0.0%',
+			   icon: 'ion-checkmark-circled',
+			   color: 'bg-indigo-800'
+		   }
+	   ];
 
 	return (
 		<div className="flex h-screen">
@@ -360,102 +372,31 @@ export default function AdminDashboard() {
 							<div className="bg-white rounded-lg shadow p-8 text-center text-slate-500">Loading dashboard data...</div>
 						) : (
 							<>
-								<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-									{displayStats.map((stat) => (
-										<div
-											key={stat.label}
-												className={`${stat.color} rounded-xl shadow-lg p-5 text-white transition`}
-										>
-											<div className="flex items-start justify-between gap-3">
-												<div>
-													<p className="text-3xl font-extrabold leading-none">{stat.value}</p>
-													<p className="mt-2 text-sm font-medium opacity-95">{stat.label}</p>
-												</div>
-												<i className={`ion ${stat.icon} text-4xl opacity-40`} />
-											</div>
-										</div>
-									))}
-								</div>
+								   <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4">
+									   {displayStats.map((stat) => (
+										   <div
+											   key={stat.label}
+											   className={`${stat.color} rounded-lg shadow p-4 min-h-[90px] flex flex-col justify-center items-start text-white transition`}
+										   >
+											   <div className="flex items-start justify-between w-full gap-2">
+												   <div>
+													   <p className="text-2xl font-extrabold leading-none">{stat.value}</p>
+													   <p className="mt-1 text-sm font-medium opacity-95">{stat.label}</p>
+												   </div>
+												   <i className={`ion ${stat.icon} text-3xl opacity-40`} />
+											   </div>
+										   </div>
+									   ))}
+								   </div>
 
-								<div className="bg-white rounded-xl shadow-lg p-6">
-									<h2 className="text-xl font-semibold text-slate-900 mb-5">Overall Performance</h2>
-									<div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-										<div className="rounded-lg p-4 bg-sky-50 border border-sky-200">
-											<p className="text-sm text-sky-700">Instances</p>
-											<p className="text-2xl font-bold text-sky-900">{instances.length}</p>
-										</div>
-										<div className="rounded-lg p-4 bg-emerald-50 border border-emerald-200">
-											<p className="text-sm text-emerald-700">Registered</p>
-											<p className="text-2xl font-bold text-emerald-900">{selectedTotals.submitted}</p>
-										</div>
-										<div className="rounded-lg p-4 bg-amber-50 border border-amber-200">
-											<p className="text-sm text-amber-700">Pending</p>
-											<p className="text-2xl font-bold text-amber-900">{selectedTotals.pending}</p>
-										</div>
-										<div className="rounded-lg p-4 bg-indigo-50 border border-indigo-200">
-											<p className="text-sm text-indigo-700">Completion</p>
-											<p className="text-2xl font-bold text-indigo-900">{selectedTotals.total > 0 ? ((selectedTotals.submitted / selectedTotals.total) * 100).toFixed(1) : '0.0'}%</p>
-										</div>
-									</div>
-								</div>
+								   {/* Removed Overall Performance section as requested */}
 
 								<div>
 									<div className="flex items-center justify-between mb-3">
 										<h2 className="text-2xl font-bold text-slate-900">Instance Overview</h2>
 									</div>
-									<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-										{instances.length === 0 && (
-											<div className="col-span-full py-10 text-center bg-white rounded-lg shadow text-slate-500">
-												No instances available
-											</div>
-										)}
-										{instances.map((instance) => {
-											const rows = allStats[instance.id] || [];
-											const submitted = rows.reduce((sum, row) => sum + Number(row.submitted || 0), 0);
-											const total = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
-											const completion = total > 0 ? ((submitted / total) * 100).toFixed(1) : '0.0';
-											const isActive = String(instance.status || '').toLowerCase() === 'active';
-
-											return (
-												<div key={instance.id} className="bg-white rounded-xl shadow p-5 border-l-4 border-sky-500">
-													<div className="flex items-start justify-between gap-3 mb-3">
-														<div>
-															<p className="font-bold text-slate-900">{instance.instancename}</p>
-															<p className="text-xs text-slate-500">
-																{instance.academic_year}, Sem {instance.semester}
-															</p>
-														</div>
-														<span
-															className={`px-2 py-1 rounded text-xs font-semibold ${
-																isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
-															}`}
-														>
-															{instance.status || 'unknown'}
-														</span>
-													</div>
-													<div className="space-y-2 text-sm mb-3">
-														<div className="flex items-center justify-between">
-															<span className="text-slate-600">Form</span>
-															<span className="font-semibold text-slate-800">
-																{instance.form_enabled ? 'Enabled' : 'Disabled'}
-															</span>
-														</div>
-														<div className="flex items-center justify-between">
-															<span className="text-slate-600">Completion</span>
-															<span className="font-semibold text-sky-700">{completion}%</span>
-														</div>
-													</div>
-													<div className="w-full h-2 rounded bg-slate-200">
-														<div
-															className="h-2 rounded bg-gradient-to-r from-emerald-500 to-sky-500"
-															style={{ width: `${completion}%` }}
-														/>
-													</div>
-												</div>
-											);
-										})}
-									</div>
-								</div>
+									   {/* Instance Overview box statistic removed as requested */}
+							   </div>
 
 								{isModalOpen && (
 									<div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">

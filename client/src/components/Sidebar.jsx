@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useAdminInstance } from '../context/AdminInstanceContext';
@@ -18,6 +19,7 @@ const instanceScopedMenuLinks = [
 
 export default function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { activeInstance, hasActiveInstance, clearInstance } = useAdminInstance();
   const [isOpen, setIsOpen] = useState(true);
@@ -55,7 +57,10 @@ export default function Sidebar() {
               <p className="text-slate-300">Sem {activeInstance?.semester || '-'} • {activeInstance?.academic_year || '-'}</p>
               <button
                 type="button"
-                onClick={clearInstance}
+                onClick={() => {
+                  clearInstance();
+                  navigate('/elective-instance');
+                }}
                 className="mt-2 rounded bg-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 hover:bg-slate-600"
               >
                 Change Instance
