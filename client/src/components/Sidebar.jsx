@@ -14,7 +14,7 @@ const instanceScopedMenuLinks = [
   { name: 'Students', path: '/students', icon: '👨‍🎓' },
   { name: 'Elective Preference', path: '/elective-preference', icon: '✅' },
   { name: 'Allocation', path: '/allocation', icon: '📝' },
-  { name: 'Reports', path: '/reports', icon: '📈' }
+  // { name: 'Reports', path: '/reports', icon: '📈' }
 ];
 
 export default function Sidebar() {

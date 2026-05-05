@@ -435,12 +435,7 @@ useEffect(() => {
 
 								   {/* Removed Overall Performance section as requested */}
 
-								<div>
-									<div className="flex items-center justify-between mb-3">
-										<h2 className="text-2xl font-bold text-slate-900">Instance Overview</h2>
-									</div>
-									   {/* Instance Overview box statistic removed as requested */}
-							   </div>
+							
 
 								{/* Quick Actions moved above tables */}
 								<div className="bg-gradient-to-r from-sky-700 to-indigo-700 rounded-xl shadow-lg p-6 text-white mb-8">
@@ -490,7 +485,11 @@ useEffect(() => {
 										</button>
 									</div>
 								</div>
-
+								<div>
+									<div className="flex items-center justify-between mb-3">
+										<h2 className="text-2xl font-bold text-slate-900">Instance Overview</h2>
+									</div>
+							   </div>
 								{isModalOpen && (
 									<div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
 										<div className="flex items-end justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
@@ -755,53 +754,7 @@ useEffect(() => {
 									</div>
 								</div>
 
-								<div className="bg-gradient-to-r from-sky-700 to-indigo-700 rounded-xl shadow-lg p-6 text-white">
-									<h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
-									<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-									{/* <button
-										type="button"
-										onClick={() => navigate('/courses')}
-										className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
-									>
-										<p className="font-semibold">Manage Courses</p>
-										<p className="text-xs opacity-90">Create and update courses</p>
-									</button> */}
-
-									{/* Allocation Button */}
-									<button
-										type="button"
-										onClick={() => navigate('/allocation')}
-										className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
-									>
-										<p className="font-semibold">Allocation</p>
-										<p className="text-xs opacity-90">Run and view allocations</p>
-									</button>
-										<button
-											type="button"
-											onClick={() => navigate('/students')}
-											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
-										>
-											<p className="font-semibold">Manage Students</p>
-											<p className="text-xs opacity-90">Add, edit, and import students</p>
-										</button>
-										{/* <button
-											type="button"
-											onClick={() => navigate('/elective-instance')}
-											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
-										>
-											<p className="font-semibold">Manage Instances</p>
-											<p className="text-xs opacity-90">Create and configure instances</p>
-										</button> */}
-										<button
-											type="button"
-											onClick={openPreferenceFormModal}
-											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
-										>
-											<p className="font-semibold">Preference Form</p>
-											<p className="text-xs opacity-90">Enable or disable form access</p>
-										</button>
-									</div>
-								</div>
+								
 							</>
 						)}
 					</div>
