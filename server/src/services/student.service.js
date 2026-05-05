@@ -14,6 +14,16 @@ function normalizeDepartmentId(value) {
 	return numericValue;
 }
 
+function normalizeInstanceId(value) {
+	const numericValue = Number(value);
+	if (!Number.isInteger(numericValue) || numericValue <= 0) {
+		const error = new Error('instance_id is required');
+		error.statusCode = 400;
+		throw error;
+	}
+	return numericValue;
+}
+
 function normalizePayload(payload = {}) {
 	const name = String(payload.name || '').trim();
 	const email = String(payload.email || '').trim().toLowerCase();
@@ -85,6 +95,18 @@ async function ensureDepartmentExists(departmentId) {
 	}
 }
 
+async function ensureInstanceExists(instanceId) {
+	const result = await pool.query(
+		'SELECT id FROM public.instances WHERE id = $1 LIMIT 1',
+		[instanceId]
+	);
+	if (result.rowCount === 0) {
+		const error = new Error('Selected instance was not found');
+		error.statusCode = 400;
+		throw error;
+	}
+}
+
 async function ensureUniqueStudentFields(student, excludedId = null) {
 	const duplicateEmail = await studentModel.findStudentByField('email', student.email, excludedId);
 	if (duplicateEmail) {
@@ -108,8 +130,8 @@ async function ensureUniqueStudentFields(student, excludedId = null) {
 	}
 }
 
-async function getStudents() {
-	return studentModel.listStudents();
+async function getStudents(instanceId) {
+	return studentModel.listStudents(instanceId || null);
 }
 
 async function getStudentMeta() {
@@ -230,13 +252,18 @@ async function resolveStudentForImport(student, rowNumber) {
 
 }
 
-async function upsertAcademicRecord(student, semester, cgpa) {
-	const existingAcademicRecord = await studentModel.getAcademicRecordByUsnAndSemester(student.usn, semester);
+async function upsertAcademicRecord(student, semester, cgpa, instanceId) {
+	const existingAcademicRecord = await studentModel.getAcademicRecordByUsnAndSemester(
+		student.usn,
+		semester,
+		instanceId
+	);
 	if (existingAcademicRecord) {
 		await studentModel.updateAcademicRecord(existingAcademicRecord.id, {
 			usn: student.usn,
 			semester,
-			cgpa
+			cgpa,
+			instance_id: instanceId
 		});
 		return;
 	}
@@ -244,11 +271,14 @@ async function upsertAcademicRecord(student, semester, cgpa) {
 	await studentModel.createAcademicRecord({
 		usn: student.usn,
 		semester,
-		cgpa
+		cgpa,
+		instance_id: instanceId
 	});
 }
 
-async function importStudentsFromFile(fileBuffer) {
+async function importStudentsFromFile(fileBuffer, instanceId) {
+	const normalizedInstanceId = normalizeInstanceId(instanceId);
+	await ensureInstanceExists(normalizedInstanceId);
 	const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
 	const firstSheetName = workbook.SheetNames[0];
 
@@ -330,7 +360,7 @@ async function importStudentsFromFile(fileBuffer) {
 
 		await ensureDepartmentExists(payload.department_id);
 		const student = await resolveStudentForImport(payload, rowNumber);
-		await upsertAcademicRecord(student, payload.semester, payload.cgpa);
+		await upsertAcademicRecord(student, payload.semester, payload.cgpa, normalizedInstanceId);
 		importedStudents.push(await studentModel.getStudentById(student.id));
 	}
 
@@ -348,10 +378,15 @@ async function importStudentsFromFile(fileBuffer) {
 
 async function addStudent(payload) {
 	const student = normalizePayload(payload);
+	const instanceId = normalizeInstanceId(payload.instance_id);
 	await ensureDepartmentExists(student.department_id);
+	await ensureInstanceExists(instanceId);
 	await ensureUniqueStudentFields(student);
 	const createdStudent = await studentModel.createStudent(student);
-	await studentModel.createAcademicRecord(student);
+	await studentModel.createAcademicRecord({
+		...student,
+		instance_id: instanceId
+	});
 	return studentModel.getStudentById(createdStudent.id);
 }
 
@@ -373,9 +408,13 @@ async function editStudent(id, payload) {
 
 	const academicRecord = await studentModel.getLatestAcademicRecordByUsn(student.usn);
 	if (academicRecord) {
-		await studentModel.updateAcademicRecord(academicRecord.id, student);
+		await studentModel.updateAcademicRecord(academicRecord.id, {
+			...student,
+			instance_id: academicRecord.instance_id
+		});
 	} else {
-		await studentModel.createAcademicRecord(student);
+		const instanceId = normalizeInstanceId(payload.instance_id);
+		await studentModel.createAcademicRecord({ ...student, instance_id: instanceId });
 	}
 
 	return studentModel.updateStudent(id, student);
@@ -451,7 +490,17 @@ async function checkName(payload = {}) {
 	}
 
 	// find active instance for the student's semester
-	const instRes = await pool.query(`SELECT id, instancename, semester, academic_year, status FROM public.instances WHERE semester = $1 AND status = 'Active' LIMIT 1`, [Number(academic.semester)]);
+	const instRes = await pool.query(
+		`SELECT id, instancename, semester, academic_year, status
+		 FROM public.instances
+		 WHERE (
+		 	semester::text = $1
+		 	OR semester::text = ('{' || $1 || '}')
+		 )
+		 AND status = 'Active'
+		 LIMIT 1`,
+		[String(Number(academic.semester))]
+	);
 	if (instRes.rowCount === 0) {
 		return { message: 'No active instance for student semester', instance: null };
 	}

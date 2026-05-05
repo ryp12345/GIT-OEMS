@@ -1,8 +1,36 @@
 const pool = require('../config/db');
 
-async function listStudents() {
-	const result = await pool.query(
-		`SELECT s.id,
+async function listStudents(instanceId) {
+	let query;
+	let params;
+
+	if (instanceId) {
+		query = `SELECT s.id,
+				s.name,
+				s.email,
+				s.uid,
+				s.usn,
+				s.department_id,
+				d.name AS department_name,
+				d.shortname AS department_shortname,
+				ar.semester,
+				ar.grade AS cgpa,
+				s.created_at,
+				s.updated_at
+		 FROM public.students s
+		 LEFT JOIN public.departments d ON d.deptid = s.department_id
+		 INNER JOIN LATERAL (
+		 	SELECT semester, grade
+		 	FROM public.student_academic_records sar
+		 	WHERE UPPER(sar.usn) = UPPER(s.usn)
+		 	  AND sar.instance_id = $1
+		 	ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
+		 	LIMIT 1
+		 ) ar ON TRUE
+		 ORDER BY s.id DESC`;
+		params = [Number(instanceId)];
+	} else {
+		query = `SELECT s.id,
 				s.name,
 				s.email,
 				s.uid,
@@ -23,9 +51,11 @@ async function listStudents() {
 		 	ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
 		 	LIMIT 1
 		 ) ar ON TRUE
-		 ORDER BY s.id DESC`
-	);
+		 ORDER BY s.id DESC`;
+		params = [];
+	}
 
+	const result = await pool.query(query, params);
 	return result.rows;
 }
 
@@ -85,7 +115,7 @@ async function createStudent(student) {
 
 async function getLatestAcademicRecordByUsn(usn) {
 	const result = await pool.query(
-		`SELECT id, usn, semester, grade
+		`SELECT id, usn, semester, grade, instance_id
 		 FROM public.student_academic_records
 		 WHERE UPPER(usn) = UPPER($1)
 		 ORDER BY updated_at DESC NULLS LAST, id DESC
@@ -96,42 +126,45 @@ async function getLatestAcademicRecordByUsn(usn) {
 	return result.rows[0] || null;
 }
 
-async function getAcademicRecordByUsnAndSemester(usn, semester) {
+async function getAcademicRecordByUsnAndSemester(usn, semester, instanceId) {
 	const result = await pool.query(
-		`SELECT id, usn, semester, grade
+		`SELECT id, usn, semester, grade, instance_id
 		 FROM public.student_academic_records
 		 WHERE UPPER(usn) = UPPER($1)
 		   AND CAST(semester AS INTEGER) = $2
+		   AND instance_id = $3
 		 ORDER BY updated_at DESC NULLS LAST, id DESC
 		 LIMIT 1`,
-		[usn, Number(semester)]
+		[usn, Number(semester), Number(instanceId)]
 	);
 
 	return result.rows[0] || null;
 }
 
-async function createAcademicRecord({ usn, semester, cgpa }) {
+async function createAcademicRecord({ usn, semester, cgpa, instance_id }) {
 	await pool.query(
 		`INSERT INTO public.student_academic_records (
 			usn,
 			semester,
 			grade,
+			instance_id,
 			created_at,
 			updated_at
-		 ) VALUES ($1, $2, $3, NOW(), NOW())`,
-		[usn, String(semester), String(cgpa)]
+		 ) VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+		[usn, String(semester), String(cgpa), Number(instance_id)]
 	);
 }
 
-async function updateAcademicRecord(id, { usn, semester, cgpa }) {
+async function updateAcademicRecord(id, { usn, semester, cgpa, instance_id }) {
 	await pool.query(
 		`UPDATE public.student_academic_records
 		 SET usn = $2,
 		 	 semester = $3,
 		 	 grade = $4,
+		 	 instance_id = $5,
 		 	 updated_at = NOW()
 		 WHERE id = $1`,
-		[id, usn, String(semester), String(cgpa)]
+		[id, usn, String(semester), String(cgpa), Number(instance_id)]
 	);
 }
 

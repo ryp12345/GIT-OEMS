@@ -218,9 +218,7 @@ async function getPreferenceStatisticsByInstance(instanceId) {
 			       AND LOWER(s.usn) IN (
 				       SELECT LOWER(usn)
 				       FROM public.student_academic_records sar
-				       WHERE CAST(sar.semester AS INTEGER) = (
-					       SELECT semester FROM public.instances WHERE id = $1
-				       )
+				       WHERE sar.instance_id = $1
 			       )
 		       LEFT JOIN public.preferences p ON LOWER(p.usn) = LOWER(s.usn)
 			       AND p.instance_course_id IN (
@@ -284,6 +282,7 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 		JOIN public.students s ON p.usn = s.usn
 		${sarJoinType} public.student_academic_records sar
 			ON s.usn = sar.usn
+			AND sar.instance_id = i.id
 			AND CAST(sar.semester AS INTEGER) = CAST(c.semester AS INTEGER)
 		WHERE i.id = $1
 		ORDER BY c.coursename ASC, ic.coursecode ASC`,
@@ -312,7 +311,9 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 				SELECT NULLIF(REGEXP_REPLACE(COALESCE(sar.grade, ''), '[^0-9.]', '', 'g'), '')::NUMERIC AS grade_num
 				FROM public.student_academic_records sar
 				WHERE sar.usn = p.usn
+				  AND sar.instance_id = i.id
 				  AND CAST(sar.semester AS INTEGER) = i.semester
+				ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
 				LIMIT 1
 			) g ON true
 			WHERE ic.instance_id = $1

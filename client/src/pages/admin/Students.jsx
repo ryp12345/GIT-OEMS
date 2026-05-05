@@ -62,14 +62,14 @@ export default function StudentsPage() {
 
 	useEffect(() => {
 		loadPageData();
-	}, []);
+	}, [activeInstance?.id]);
 
 	async function loadPageData() {
 		try {
 			setIsLoading(true);
 			setError('');
 			const [studentsResponse, metaResponse] = await Promise.all([
-				getStudents(token),
+				getStudents(token, activeInstance?.id || null),
 				getStudentMeta(token)
 			]);
 
@@ -139,8 +139,14 @@ export default function StudentsPage() {
 			return;
 		}
 
+		if (!activeInstance?.id) {
+			setError('Please select an active instance before importing students');
+			return;
+		}
+
 		const formData = new FormData();
 		formData.append('file', selectedImportFile);
+		formData.append('instance_id', String(activeInstance.id));
 
 		try {
 			setIsImporting(true);
@@ -259,7 +265,15 @@ export default function StudentsPage() {
 				await updateStudent(editingId, payload, token);
 				showNotification('Student updated successfully', 'success');
 			} else {
-				await createStudent(payload, token);
+				if (!activeInstance?.id) {
+					setError('Please select an active instance before creating a student');
+					setIsSubmitting(false);
+					return;
+				}
+				await createStudent({
+					...payload,
+					instance_id: Number(activeInstance.id)
+				}, token);
 				showNotification('Student created successfully', 'success');
 			}
 
@@ -295,11 +309,8 @@ export default function StudentsPage() {
 
 	const filtered = useMemo(() => {
 		const query = search.trim().toLowerCase();
-		const effectiveSemesterFilter = hasActiveInstance
-			? String(activeInstance?.semester || '')
-			: semesterFilter;
 		const filteredStudents = students.filter((student) => {
-			if (effectiveSemesterFilter && String(student.semester || '') !== effectiveSemesterFilter) {
+			if (!hasActiveInstance && semesterFilter && String(student.semester || '') !== semesterFilter) {
 				return false;
 			}
 
@@ -338,7 +349,7 @@ export default function StudentsPage() {
 				? Number(left.id || 0) - Number(right.id || 0)
 				: Number(right.id || 0) - Number(left.id || 0);
 		});
-	}, [students, search, semesterFilter, departmentFilter, sortOrder, hasActiveInstance, activeInstance]);
+	}, [students, search, semesterFilter, departmentFilter, sortOrder, hasActiveInstance]);
 
 	const paginated = useMemo(() => {
 		const start = (page - 1) * PAGE_SIZE;
@@ -371,6 +382,7 @@ export default function StudentsPage() {
 							show={notification.show}
 							message={notification.message}
 							type={notification.type}
+							position="topRight"
 							onClose={() => setNotification({ show: false, message: '', type: 'info' })}
 						/>
 

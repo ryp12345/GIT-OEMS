@@ -9,6 +9,7 @@ import {
 	getInstanceView,
 	getPreferenceFormStatus,
 	getPreferenceStatistics,
+	getPreferenceStatisticsDetails,
 	setPreferenceFormStatus
 } from '../../api/instance.api';
 import { getCourses } from '../../api/course.api';
@@ -46,6 +47,55 @@ export default function AdminDashboard() {
 	const [selectedInstanceId, setSelectedInstanceId] = useState('');
 	const [preferenceStats, setPreferenceStats] = useState([]);
 	const [chartStats, setChartStats] = useState([]);
+	const [electiveRows, setElectiveRows] = useState([]);
+	const [electivePrefs, setElectivePrefs] = useState([]);
+// Helper for dynamic preference columns
+function getAllPreferences(rows) {
+	const prefs = new Set();
+	rows.forEach((row) => {
+		Object.keys(row || {}).forEach((key) => {
+			const match = /^p(\d+)_count$/i.exec(key);
+			if (match) prefs.add(Number(match[1]));
+		});
+		if (Array.isArray(row?.preferences)) {
+			row.preferences.forEach((p) => prefs.add(Number(p.prefIndex)));
+		}
+	});
+	if (prefs.size === 0) return [1, 2];
+	return Array.from(prefs).filter(Number.isFinite).sort((a, b) => a - b);
+}
+
+function formatGrade(value) {
+	if (value == null || Number.isNaN(Number(value))) return '';
+	return Number(value).toFixed(2);
+}
+
+function getFirstDefined(...values) {
+	for (const value of values) {
+		if (value !== undefined && value !== null) return value;
+	}
+	return null;
+}
+// Fetch elective preferences for dashboard view
+useEffect(() => {
+	async function fetchElectivePrefs() {
+		if (!activeInstanceId) {
+			setElectiveRows([]);
+			setElectivePrefs([]);
+			return;
+		}
+		try {
+			const res = await getPreferenceStatisticsDetails(activeInstanceId, token);
+			const rows = Array.isArray(res?.data?.rows) ? res.data.rows : Array.isArray(res?.data) ? res.data : [];
+			setElectiveRows(rows);
+			setElectivePrefs(getAllPreferences(rows));
+		} catch {
+			setElectiveRows([]);
+			setElectivePrefs([]);
+		}
+	}
+	fetchElectivePrefs();
+}, [activeInstanceId, token]);
 
 	const [isModalOpen, setIsModalOpen] = useState(false);
 	const [selectedInstanceForForm, setSelectedInstanceForForm] = useState('');
@@ -54,7 +104,7 @@ export default function AdminDashboard() {
 
 	useEffect(() => {
 		loadDashboardData();
-	}, []);
+	}, [activeInstanceId]);
 
 	async function loadDashboardData() {
 		try {
@@ -63,7 +113,7 @@ export default function AdminDashboard() {
 
 			const [instancesRes, studentsRes] = await Promise.all([
 				getInstances(token),
-				getStudents(token)
+				getStudents(token, activeInstanceId || null)
 			]);
 
 			const instancesData = Array.isArray(instancesRes?.data?.data)
@@ -288,15 +338,8 @@ export default function AdminDashboard() {
 
 	const studentsInActiveInstance = useMemo(() => {
 		if (!hasActiveInstance) return 0;
-		const semester = String(activeInstance?.semester || '').trim();
-		const usnSet = new Set(
-			students
-				.filter((student) => String(student.semester || '').trim() === semester)
-				.map((student) => String(student.usn || '').trim().toUpperCase())
-				.filter(Boolean)
-		);
-		return usnSet.size;
-	}, [students, hasActiveInstance, activeInstance]);
+		return students.length;
+	}, [students, hasActiveInstance]);
 
 	const coursesInActiveInstance = useMemo(() => (
 		hasActiveInstance ? instanceCourses.length : 0
@@ -351,6 +394,7 @@ export default function AdminDashboard() {
 							show={notification.show}
 							message={notification.message}
 							type={notification.type}
+							position="topRight"
 							onClose={() => setNotification({ show: false, message: '', type: 'info' })}
 						/>
 
@@ -397,6 +441,55 @@ export default function AdminDashboard() {
 									</div>
 									   {/* Instance Overview box statistic removed as requested */}
 							   </div>
+
+								{/* Quick Actions moved above tables */}
+								<div className="bg-gradient-to-r from-sky-700 to-indigo-700 rounded-xl shadow-lg p-6 text-white mb-8">
+									<h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
+									<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+										{/* <button
+											type="button"
+											onClick={() => navigate('/courses')}
+											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+										>
+											<p className="font-semibold">Manage Courses</p>
+											<p className="text-xs opacity-90">Create and update courses</p>
+										</button> */}
+
+										{/* Allocation Button */}
+										<button
+											type="button"
+											onClick={() => navigate('/allocation')}
+											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+										>
+											<p className="font-semibold">Allocation</p>
+											<p className="text-xs opacity-90">Run and view allocations</p>
+										</button>
+										<button
+											type="button"
+											onClick={() => navigate('/students')}
+											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+										>
+											<p className="font-semibold">Manage Students</p>
+											<p className="text-xs opacity-90">Add, edit, and import students</p>
+										</button>
+										{/* <button
+											type="button"
+											onClick={() => navigate('/elective-instance')}
+											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+										>
+											<p className="font-semibold">Manage Instances</p>
+											<p className="text-xs opacity-90">Create and configure instances</p>
+										</button> */}
+										<button
+											type="button"
+											onClick={openPreferenceFormModal}
+											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+										>
+											<p className="font-semibold">Preference Form</p>
+											<p className="text-xs opacity-90">Enable or disable form access</p>
+										</button>
+									</div>
+								</div>
 
 								{isModalOpen && (
 									<div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
@@ -479,7 +572,104 @@ export default function AdminDashboard() {
 								)}
 
 								<div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-									<div className="bg-white rounded-xl shadow-lg p-6">
+										{/* Elective Preferences Table (read-only) */}
+										<div className="bg-white rounded-xl shadow-lg p-6 min-h-[500px]">
+											<h2 className="text-xl font-semibold text-slate-900 mb-6">Elective Preferences </h2>
+											<div className="overflow-x-auto">
+												<table className="min-w-full border-collapse">
+													<thead>
+														<tr className="bg-blue-600 text-white">
+															<th className="border px-4 py-3 text-left text-xs uppercase" rowSpan={2}>Sl.No</th>
+															<th className="border px-4 py-3 text-left text-xs uppercase" rowSpan={2}>Course Name</th>
+															<th className="border px-4 py-3 text-center text-xs uppercase" colSpan={electivePrefs.length * 4}>Preferences</th>
+															<th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Div</th>
+															<th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Min</th>
+															<th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Max</th>
+															<th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Allocations</th>
+															<th className="border px-4 py-3 text-center text-xs uppercase" rowSpan={2}>Status</th>
+														</tr>
+														<tr className="bg-blue-600 text-white">
+															{electivePrefs.map((pref) => [
+																<th key={`p${pref}_count`} className="border px-3 py-2 text-center text-xs font-semibold">{pref}</th>,
+																<th key={`p${pref}_min`} className="border px-3 py-2 text-center text-xs">Min</th>,
+																<th key={`p${pref}_median`} className="border px-3 py-2 text-center text-xs">Median</th>,
+																<th key={`p${pref}_max`} className="border px-3 py-2 text-center text-xs">Max</th>
+															])}
+														</tr>
+													</thead>
+													<tbody>
+														{electiveRows.length === 0 ? (
+															<tr>
+																<td colSpan={electivePrefs.length * 4 + 7} className="px-6 py-12 text-center text-gray-500">
+																	{hasActiveInstance ? 'No elective preference data available for this instance' : 'Select an instance to view preferences.'}
+																</td>
+															</tr>
+														) : (
+															electiveRows.map((row, index) => {
+																const getPreferenceCell = (pref) => {
+																	const count = getFirstDefined(row[`p${pref}_count`], row[`p${pref}_cnt`]);
+																	const min = getFirstDefined(row[`p${pref}_min_grade`], row[`p${pref}_min`]);
+																	const median = getFirstDefined(
+																		row[`p${pref}_median_grade`],
+																		row[`p${pref}_medium_grade`],
+																		row[`p${pref}_median`],
+																		row[`p${pref}_medium`]
+																	);
+																	const max = getFirstDefined(row[`p${pref}_max_grade`], row[`p${pref}_max`]);
+																	if (
+																		count == null &&
+																		min == null &&
+																		median == null &&
+																		max == null &&
+																		Array.isArray(row.preferences)
+																	) {
+																		const legacy = row.preferences.find((p) => Number(p.prefIndex) === pref) || {};
+																		return {
+																			count: getFirstDefined(legacy.count, legacy.total),
+																			min_grade: getFirstDefined(legacy.min_grade, legacy.min),
+																			median_grade: getFirstDefined(
+																				legacy.median_grade,
+																				legacy.medium_grade,
+																				legacy.median,
+																				legacy.medium
+																			),
+																			max_grade: getFirstDefined(legacy.max_grade, legacy.max)
+																		};
+																	}
+																	return {
+																		count,
+																		min_grade: min,
+																		median_grade: median,
+																		max_grade: max
+																	};
+																};
+																return (
+																	<tr key={`${row.coursecode}-${index}`} className="border-b border-gray-200">
+																		<td className="border px-3 py-2 text-sm">{index + 1}</td>
+																		<td className="border px-3 py-2 text-sm">{row.coursename} ({row.coursecode})</td>
+																		{electivePrefs.map((pref) => {
+																			const p = getPreferenceCell(pref);
+																			return [
+																				<td key={`p${pref}_count`} className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{p.count ?? ''}</td>,
+																				<td key={`p${pref}_min`} className="border px-3 py-2 text-center text-sm">{formatGrade(p.min_grade)}</td>,
+																				<td key={`p${pref}_median`} className="border px-3 py-2 text-center text-sm">{formatGrade(p.median_grade)}</td>,
+																				<td key={`p${pref}_max`} className="border px-3 py-2 text-center text-sm">{formatGrade(p.max_grade)}</td>
+																			];
+																		})}
+																		<td className="border px-3 py-2 text-center text-sm">{row.division}</td>
+																		<td className="border px-3 py-2 text-center text-sm">{row.min_intake}</td>
+																		<td className="border px-3 py-2 text-center text-sm">{row.max_intake}</td>
+																		<td className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{row.total_allocations}</td>
+																		<td className="border px-3 py-2 text-center text-sm font-bold">{row.allocation_status}</td>
+																	</tr>
+																);
+															})
+														)}
+													</tbody>
+												</table>
+											</div>
+										</div>
+									{/* <div className="bg-white rounded-xl shadow-lg p-6">
 										<h2 className="text-xl font-semibold text-slate-900 mb-6">Elective Preference Statistics</h2>
 										{chartStats.length > 0 ? (
 											<div className="space-y-4">
@@ -512,9 +702,9 @@ export default function AdminDashboard() {
 													<p className="text-slate-500">{hasActiveInstance ? 'No chart data available for this instance' : 'Select an active instance to view chart data'}</p>
 											</div>
 										)}
-									</div>
+									</div> */}
 
-									<div className="bg-white rounded-xl shadow-lg p-6">
+									<div className="bg-white rounded-xl shadow-lg p-6 min-h-[500px]">
 										<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
 											<h2 className="text-xl font-semibold text-slate-900">Student Preference Status</h2>
 											<div className="w-full sm:w-auto rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
@@ -526,16 +716,16 @@ export default function AdminDashboard() {
 
 										{preferenceStats.length > 0 ? (
 											<div className="overflow-x-auto">
-												<table className="min-w-full divide-y divide-slate-200 border border-slate-200">
-													<thead className="bg-slate-100">
-														<tr>
-															<th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Sl.No</th>
-															<th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Department</th>
-															<th className="px-4 py-3 text-center text-xs font-semibold text-slate-700 uppercase">Submitted</th>
-															<th className="px-4 py-3 text-center text-xs font-semibold text-slate-700 uppercase">Pending</th>
-															<th className="px-4 py-3 text-center text-xs font-semibold text-slate-700 uppercase">Total</th>
-														</tr>
-													</thead>
+										<table className="min-w-full divide-y divide-slate-200 border border-slate-200">
+											<thead>
+												<tr className="bg-blue-600 text-white">
+													<th className="px-4 py-3 text-left text-xs font-semibold uppercase">Sl.No</th>
+													<th className="px-4 py-3 text-left text-xs font-semibold uppercase">Department</th>
+													<th className="px-4 py-3 text-center text-xs font-semibold uppercase">Submitted</th>
+													<th className="px-4 py-3 text-center text-xs font-semibold uppercase">Pending</th>
+													<th className="px-4 py-3 text-center text-xs font-semibold uppercase">Total</th>
+												</tr>
+											</thead>
 													<tbody className="divide-y divide-slate-200 bg-white">
 														{preferenceStats.map((row, idx) => (
 															<tr key={`${row.slNo}-${row.department}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
@@ -568,14 +758,24 @@ export default function AdminDashboard() {
 								<div className="bg-gradient-to-r from-sky-700 to-indigo-700 rounded-xl shadow-lg p-6 text-white">
 									<h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
 									<div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-										<button
-											type="button"
-											onClick={() => navigate('/courses')}
-											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
-										>
-											<p className="font-semibold">Manage Courses</p>
-											<p className="text-xs opacity-90">Create and update courses</p>
-										</button>
+									{/* <button
+										type="button"
+										onClick={() => navigate('/courses')}
+										className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+									>
+										<p className="font-semibold">Manage Courses</p>
+										<p className="text-xs opacity-90">Create and update courses</p>
+									</button> */}
+
+									{/* Allocation Button */}
+									<button
+										type="button"
+										onClick={() => navigate('/allocation')}
+										className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+									>
+										<p className="font-semibold">Allocation</p>
+										<p className="text-xs opacity-90">Run and view allocations</p>
+									</button>
 										<button
 											type="button"
 											onClick={() => navigate('/students')}
@@ -584,14 +784,14 @@ export default function AdminDashboard() {
 											<p className="font-semibold">Manage Students</p>
 											<p className="text-xs opacity-90">Add, edit, and import students</p>
 										</button>
-										<button
+										{/* <button
 											type="button"
 											onClick={() => navigate('/elective-instance')}
 											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
 										>
 											<p className="font-semibold">Manage Instances</p>
 											<p className="text-xs opacity-90">Create and configure instances</p>
-										</button>
+										</button> */}
 										<button
 											type="button"
 											onClick={openPreferenceFormModal}

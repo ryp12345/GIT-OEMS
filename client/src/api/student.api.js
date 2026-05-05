@@ -4,9 +4,10 @@ const tokenHeaders = (token) => {
 	return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-export function getStudents(token) {
+export function getStudents(token, instanceId) {
 	return api.get('/students', {
-		headers: tokenHeaders(token)
+		headers: tokenHeaders(token),
+		params: instanceId ? { instance_id: instanceId } : undefined
 	});
 }
 

@@ -6,7 +6,12 @@ const toneClasses = {
 	info: 'border-blue-200 bg-blue-50 text-blue-700'
 };
 
-export default function Notification({ show, message, type = 'info', onClose }) {
+const positionClasses = {
+	inline: 'mb-6',
+	topRight: 'fixed right-6 top-6 z-50 w-full max-w-md'
+};
+
+function Notification({ show, message, type = 'info', onClose, position = 'inline' }) {
 	useEffect(() => {
 		if (!show) return undefined;
 
@@ -20,7 +25,7 @@ export default function Notification({ show, message, type = 'info', onClose }) 
 	if (!show || !message) return null;
 
 	return (
-		<div className={`mb-6 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm ${toneClasses[type] || toneClasses.info}`}>
+		<div className={`${positionClasses[position] || positionClasses.inline} flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm shadow ${toneClasses[type] || toneClasses.info}`}>
 			<span>{message}</span>
 			<button
 				type="button"
@@ -32,3 +37,6 @@ export default function Notification({ show, message, type = 'info', onClose }) 
 		</div>
 	);
 }
+
+export { Notification };
+export default Notification;

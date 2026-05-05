@@ -2,7 +2,8 @@ const studentService = require('../services/student.service');
 
 exports.list = async (req, res, next) => {
 	try {
-		const students = await studentService.getStudents();
+		const instanceId = req.query.instance_id ? Number(req.query.instance_id) : null;
+		const students = await studentService.getStudents(instanceId);
 		res.json(students);
 	} catch (error) {
 		next(error);
@@ -46,7 +47,7 @@ exports.import = async (req, res, next) => {
 			throw error;
 		}
 
-		const result = await studentService.importStudentsFromFile(req.file.buffer);
+		const result = await studentService.importStudentsFromFile(req.file.buffer, req.body?.instance_id);
 		res.status(201).json(result);
 	} catch (error) {
 		next(error);

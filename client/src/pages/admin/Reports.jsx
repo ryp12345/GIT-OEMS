@@ -150,6 +150,7 @@ export default function Reports() {
 							show={notification.show}
 							message={notification.message}
 							type={notification.type}
+							position="topRight"
 							onClose={() => setNotification({ show: false, message: '', type: 'info' })}
 						/>
 
