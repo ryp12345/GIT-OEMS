@@ -15,6 +15,7 @@ export default function StudentRegistrationPage() {
   const [registeredPreferences, setRegisteredPreferences] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState([]);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [isSavingPreferences, setIsSavingPreferences] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
 
   useEffect(() => {
@@ -128,6 +129,8 @@ export default function StudentRegistrationPage() {
   }
 
   async function handleConfirmSubmission() {
+    if (isSavingPreferences) return;
+
     const preferences = selectedPreferences.map((row) => ({
       instance_course_id: row.instance_course_id,
       usn: basic.usn,
@@ -135,11 +138,24 @@ export default function StudentRegistrationPage() {
     }));
 
     try {
+      setIsSavingPreferences(true);
       await submitPreferences({ preferences }, token);
+
+      const refreshed = await checkStudentDetails({ uid1: basic.uid, name1: basic.name, usn: basic.usn }, token);
+      const refreshedData = refreshed?.data || {};
+
+      if (refreshedData.registered) {
+        setRegisteredPreferences(refreshedData.preferences || []);
+        setCourses([]);
+        setSelectedOrder([]);
+      }
+
       setIsConfirmOpen(false);
       setNotification({ show: true, message: 'Preferences saved', type: 'success' });
     } catch (err) {
       setNotification({ show: true, message: err?.response?.data?.error || 'Failed to save', type: 'error' });
+    } finally {
+      setIsSavingPreferences(false);
     }
   }
 
@@ -147,7 +163,13 @@ export default function StudentRegistrationPage() {
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
       <div className="w-full max-w-3xl bg-white rounded-lg shadow p-6">
-        <Notification show={notification.show} message={notification.message} type={notification.type} onClose={() => setNotification({ show: false, message: '', type: 'info' })} />
+        <Notification
+          show={notification.show}
+          message={notification.message}
+          type={notification.type}
+          position="topRight"
+          onClose={() => setNotification({ show: false, message: '', type: 'info' })}
+        />
 
         <h1 className="text-2xl font-semibold mb-2 text-center">Elective Registration</h1>
         <p className="text-sm text-gray-600 mb-6">Follow the steps to save your preferences.</p>
@@ -282,8 +304,13 @@ export default function StudentRegistrationPage() {
                 <button type="button" onClick={() => setIsConfirmOpen(false)} className="rounded border border-slate-300 px-4 py-2 text-slate-700">
                   Cancel
                 </button>
-                <button type="button" onClick={handleConfirmSubmission} className="rounded bg-blue-600 px-4 py-2 text-white">
-                  Confirm
+                <button
+                  type="button"
+                  onClick={handleConfirmSubmission}
+                  disabled={isSavingPreferences}
+                  className="rounded bg-blue-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingPreferences ? 'Submitting...' : 'Confirm'}
                 </button>
               </div>
             </div>
