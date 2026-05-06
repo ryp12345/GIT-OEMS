@@ -81,9 +81,14 @@ export default function StudentRegistrationPage() {
         Object.keys(grouped).forEach((grp) => {
           grouped[grp].forEach((c) => flat.push({ ...c, group_name: grp }));
         });
+        const validCourseIds = new Set(flat.map((row) => String(row.icid ?? row.id)));
+        const preselected = (data.existingPreferences || [])
+          .sort((a, b) => Number(a.preferred) - Number(b.preferred))
+          .map((row) => String(row.instance_course_id))
+          .filter((id) => validCourseIds.has(id));
         setRegisteredPreferences(null);
         setCourses(flat);
-        setSelectedOrder([]);
+        setSelectedOrder(preselected);
       }
       // setShowBasic(false); // Keep basic details and Proceed button visible
       setShowCourses(true);

@@ -69,7 +69,13 @@ export default function ElectiveInstancePage() {
 			setError('');
 			const response = await getInstances(token);
 			const data = response?.data?.data || response?.data || [];
-			setInstances(Array.isArray(data) ? data : []);
+			// Remove duplicates by ID
+			const uniqueInstances = Array.isArray(data)
+				? data.filter((instance, index, self) =>
+					index === self.findIndex(i => String(i.id) === String(instance.id))
+				)
+				: [];
+			setInstances(uniqueInstances);
 		} catch (requestError) {
 			setError(requestError?.response?.data?.error || 'Unable to load elective instances');
 			setInstances([]);
@@ -148,15 +154,19 @@ export default function ElectiveInstancePage() {
 			let shouldReload = true;
 			if (editingId) {
 				await updateInstance(editingId, payload, token);
+				showNotification('Elective instance updated successfully', 'success');
 			} else {
 				const response = await createInstance(payload, token);
 				const createdInstance = response?.data?.data || response?.data || null;
 				setPage(1);
 				if (createdInstance && typeof createdInstance === 'object') {
-					setInstances((current) => [
-						createdInstance,
-						...current.filter((instance) => String(instance.id) !== String(createdInstance.id))
-					]);
+					setInstances((current) => {
+						const updated = [createdInstance, ...current.filter((instance) => String(instance.id) !== String(createdInstance.id))];
+						// Remove duplicates by ID
+						return updated.filter((instance, index, self) =>
+							index === self.findIndex(i => String(i.id) === String(instance.id))
+						);
+					});
 					shouldReload = false;
 				}
 				showNotification('Elective instance created successfully', 'success');

@@ -509,29 +509,42 @@ async function checkName(payload = {}) {
 
 	// check if student has existing preferences for this active instance
 	const prefsRes = await pool.query(
-		`SELECT p.preferred, p.final_preference, p.allocation_status, p.status, c.coursename, c.coursecode, p.instance_course_id
+		`SELECT p.preferred, p.final_preference, p.allocation_status, p.status, c.coursename, c.coursecode, p.instance_course_id, eg.group_name
 		 FROM public.preferences p
 		 JOIN public.instance_courses ic ON ic.id = p.instance_course_id AND ic.instance_id = $1
-		 LEFT JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
+		 LEFT JOIN public.courses c ON UPPER(TRIM(c.coursecode)) = UPPER(TRIM(ic.coursecode))
+		 LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
 		 WHERE UPPER(p.usn) = UPPER($2)
 		 ORDER BY p.preferred ASC, p.instance_course_id ASC`,
 		[instance.id, student.usn]
 	);
-
-	if (prefsRes.rowCount > 0) {
-		return { registered: true, preferences: prefsRes.rows };
-	}
 
 	// otherwise list permitted courses for the student's department in this instance
 	// and enforce PHP-equivalent restricted/prerequisite rules based on previously allotted courses
 	       const coursesRes = await pool.query(
 		       `SELECT ic.id AS icid, ic.*, c.coursename, c.coursecode, eg.group_name
 			FROM public.instance_courses ic
-			JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
+			JOIN public.courses c ON UPPER(TRIM(c.coursecode)) = UPPER(TRIM(ic.coursecode))
 			LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
 			WHERE ic.instance_id = $1
-				AND ic.id IN (SELECT instance_course_id FROM public.permitted_branches WHERE department_id = $2)
-				AND NOT (ic.division = 0 AND ic.min_intake = 0 AND ic.max_intake = 0)
+				AND (
+					NOT EXISTS (
+						SELECT 1
+						FROM public.permitted_branches pb0
+						WHERE pb0.instance_course_id = ic.id
+					)
+					OR EXISTS (
+						SELECT 1
+						FROM public.permitted_branches pb
+						WHERE pb.instance_course_id = ic.id
+						  AND pb.department_id = $2
+					)
+				)
+				AND NOT (
+					COALESCE(ic.division, 0) = 0
+					AND COALESCE(ic.min_intake, 0) = 0
+					AND COALESCE(ic.max_intake, 0) = 0
+				)
 				AND (
 					c.restricted IS NULL
 					OR UPPER(c.restricted) NOT IN (
@@ -563,6 +576,23 @@ async function checkName(payload = {}) {
 		const key = row.group_name || 'No Group';
 		if (!grouped[key]) grouped[key] = [];
 		grouped[key].push(row);
+	}
+
+	if (prefsRes.rowCount > 0) {
+		const eligibleCourseIds = new Set(coursesRes.rows.map((row) => Number(row.icid)));
+		const eligiblePreferences = prefsRes.rows.filter((row) => eligibleCourseIds.has(Number(row.instance_course_id)));
+		const isFullyRegistered = eligibleCourseIds.size > 0 && eligiblePreferences.length === eligibleCourseIds.size;
+
+		if (isFullyRegistered) {
+			return { registered: true, preferences: eligiblePreferences };
+		}
+
+		return {
+			registered: false,
+			instance: { id: instance.id, instancename: instance.instancename },
+			courses: grouped,
+			existingPreferences: eligiblePreferences
+		};
 	}
 
 	return { registered: false, instance: { id: instance.id, instancename: instance.instancename }, courses: grouped };

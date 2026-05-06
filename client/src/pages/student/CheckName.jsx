@@ -17,8 +17,12 @@ export default function CheckNamePage() {
     e.preventDefault();
     try {
       const res = await checkStudentDetails(values, token);
-      setResult(res.data || res);
-      setSelectedOrder([]);
+      const data = res.data || res;
+      setResult(data);
+      const preselected = (data?.existingPreferences || [])
+        .sort((a, b) => Number(a.preferred) - Number(b.preferred))
+        .map((row) => String(row.instance_course_id));
+      setSelectedOrder(preselected);
     } catch (err) {
       setNotification({ show: true, message: err?.response?.data?.error || err?.message || 'Check failed', type: 'error' });
     }
