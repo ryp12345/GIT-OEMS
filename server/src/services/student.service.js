@@ -524,38 +524,39 @@ async function checkName(payload = {}) {
 
 	// otherwise list permitted courses for the student's department in this instance
 	// and enforce PHP-equivalent restricted/prerequisite rules based on previously allotted courses
-	const coursesRes = await pool.query(
-		`SELECT ic.id AS icid, ic.*, c.coursename, c.coursecode, eg.group_name
-		 FROM public.instance_courses ic
-		 JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
-		 LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
-		 WHERE ic.instance_id = $1
-			 AND ic.id IN (SELECT instance_course_id FROM public.permitted_branches WHERE department_id = $2)
-			 AND (
-				 c.restricted IS NULL
-				 OR UPPER(c.restricted) NOT IN (
-					SELECT UPPER(c1.coursecode)
-					FROM public.preferences p
-					JOIN public.instance_courses ic1 ON ic1.id = p.instance_course_id
-					JOIN public.courses c1 ON UPPER(c1.coursecode) = UPPER(ic1.coursecode)
-					WHERE UPPER(p.usn) = UPPER($3)
-					  AND p.status = p.final_preference
-				 )
-			 )
-			 AND (
-				 COALESCE(c.compulsory_prereq, 'No') <> 'Yes'
-				 OR UPPER(c.pre_req) IN (
-					SELECT UPPER(c2.coursecode)
-					FROM public.preferences p2
-					JOIN public.instance_courses ic2 ON ic2.id = p2.instance_course_id
-					JOIN public.courses c2 ON UPPER(c2.coursecode) = UPPER(ic2.coursecode)
-					WHERE UPPER(p2.usn) = UPPER($3)
-					  AND p2.status = p2.final_preference
-				 )
-			 )
-		 ORDER BY eg.group_name NULLS LAST, c.coursename ASC, c.coursecode ASC`,
-		[instance.id, student.department_id, student.usn]
-	);
+	       const coursesRes = await pool.query(
+		       `SELECT ic.id AS icid, ic.*, c.coursename, c.coursecode, eg.group_name
+			FROM public.instance_courses ic
+			JOIN public.courses c ON UPPER(c.coursecode) = UPPER(ic.coursecode)
+			LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
+			WHERE ic.instance_id = $1
+				AND ic.id IN (SELECT instance_course_id FROM public.permitted_branches WHERE department_id = $2)
+				AND NOT (ic.division = 0 AND ic.min_intake = 0 AND ic.max_intake = 0)
+				AND (
+					c.restricted IS NULL
+					OR UPPER(c.restricted) NOT IN (
+					       SELECT UPPER(c1.coursecode)
+					       FROM public.preferences p
+					       JOIN public.instance_courses ic1 ON ic1.id = p.instance_course_id
+					       JOIN public.courses c1 ON UPPER(c1.coursecode) = UPPER(ic1.coursecode)
+					       WHERE UPPER(p.usn) = UPPER($3)
+						 AND p.status = p.final_preference
+					)
+				)
+				AND (
+					COALESCE(c.compulsory_prereq, 'No') <> 'Yes'
+					OR UPPER(c.pre_req) IN (
+					       SELECT UPPER(c2.coursecode)
+					       FROM public.preferences p2
+					       JOIN public.instance_courses ic2 ON ic2.id = p2.instance_course_id
+					       JOIN public.courses c2 ON UPPER(c2.coursecode) = UPPER(ic2.coursecode)
+					       WHERE UPPER(p2.usn) = UPPER($3)
+						 AND p2.status = p2.final_preference
+					)
+				)
+			ORDER BY eg.group_name NULLS LAST, c.coursename ASC, c.coursecode ASC`,
+		       [instance.id, student.department_id, student.usn]
+	       );
 
 	const grouped = {};
 	for (const row of coursesRes.rows) {

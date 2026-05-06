@@ -145,15 +145,27 @@ export default function ElectiveInstancePage() {
 
 		try {
 			const payload = normalizeFormState(formState);
+			let shouldReload = true;
 			if (editingId) {
 				await updateInstance(editingId, payload, token);
 			} else {
-				await createInstance(payload, token);
+				const response = await createInstance(payload, token);
+				const createdInstance = response?.data?.data || response?.data || null;
+				setPage(1);
+				if (createdInstance && typeof createdInstance === 'object') {
+					setInstances((current) => [
+						createdInstance,
+						...current.filter((instance) => String(instance.id) !== String(createdInstance.id))
+					]);
+					shouldReload = false;
+				}
 				showNotification('Elective instance created successfully', 'success');
 			}
 
 			onCloseModal();
-			await loadInstances();
+			if (shouldReload) {
+				await loadInstances();
+			}
 		} catch (requestError) {
 			const message = requestError?.response?.data?.error || 'Unable to save elective instance';
 			setError(message);
@@ -189,12 +201,11 @@ export default function ElectiveInstancePage() {
 	}
 
 	const filtered = useMemo(() => {
-		const sorted = [...instances].sort((left, right) => (right.id || 0) - (left.id || 0));
 		const query = search.trim().toLowerCase();
 
-		if (!query) return sorted;
+		if (!query) return instances;
 
-		return sorted.filter((instance) => (
+		return instances.filter((instance) => (
 			instance.instancename?.toLowerCase().includes(query)
 			|| String(instance.semester || '').includes(query)
 			|| instance.academic_year?.toLowerCase().includes(query)
