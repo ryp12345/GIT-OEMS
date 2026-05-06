@@ -36,7 +36,7 @@ export default function Header() {
     <header className="border-b border-slate-200 bg-white shadow-sm">
       <div className="flex h-20 w-full items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3 justify-center w-full">
-          {/* <img src="/git_logo.jpg" alt="Git logo" className="h-10 w-10 rounded-md object-contain" /> */}
+          <img src="/git_logo.jpg" alt="Git logo" className="h-10 w-10 rounded-md object-contain" />
           <h1 className="br text-xl sm:text-2xl font-bold text-center text-slate-900">KLS-Gogte Institute of Technology</h1>
         </div>
         <div className="flex items-center justify-end space-x-3 relative">
