@@ -506,6 +506,10 @@ async function checkName(payload = {}) {
 	}
 
 	const instance = instRes.rows[0];
+	const currentSemester = Number(String(instance.semester || '').replace(/[{}]/g, ''));
+	const previousSemester = Number.isInteger(currentSemester) && currentSemester > 1
+		? currentSemester - 1
+		: null;
 
 	// check if student has existing preferences for this active instance
 	const prefsRes = await pool.query(
@@ -519,83 +523,239 @@ async function checkName(payload = {}) {
 		[instance.id, student.usn]
 	);
 
-	// otherwise list permitted courses for the student's department in this instance
-	// and enforce PHP-equivalent restricted/prerequisite rules based on previously allotted courses
-	       const coursesRes = await pool.query(
-		       `SELECT ic.id AS icid, ic.*, c.coursename, c.coursecode, eg.group_name
-			FROM public.instance_courses ic
-			JOIN public.courses c ON UPPER(TRIM(c.coursecode)) = UPPER(TRIM(ic.coursecode))
-			LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
-			WHERE ic.instance_id = $1
-				AND (
-					NOT EXISTS (
-						SELECT 1
-						FROM public.permitted_branches pb0
-						WHERE pb0.instance_course_id = ic.id
-					)
-					OR EXISTS (
-						SELECT 1
-						FROM public.permitted_branches pb
-						WHERE pb.instance_course_id = ic.id
-						  AND pb.department_id = $2
-					)
-				)
-				AND NOT (
-					COALESCE(ic.division, 0) = 0
-					AND COALESCE(ic.min_intake, 0) = 0
-					AND COALESCE(ic.max_intake, 0) = 0
-				)
-				AND (
-					c.restricted IS NULL
-					OR UPPER(c.restricted) NOT IN (
-					       SELECT UPPER(c1.coursecode)
-					       FROM public.preferences p
-					       JOIN public.instance_courses ic1 ON ic1.id = p.instance_course_id
-					       JOIN public.courses c1 ON UPPER(c1.coursecode) = UPPER(ic1.coursecode)
-					       WHERE UPPER(p.usn) = UPPER($3)
-						 AND p.status = p.final_preference
-					)
-				)
-				AND (
-					COALESCE(c.compulsory_prereq, 'No') <> 'Yes'
-					OR UPPER(c.pre_req) IN (
-					       SELECT UPPER(c2.coursecode)
-					       FROM public.preferences p2
-					       JOIN public.instance_courses ic2 ON ic2.id = p2.instance_course_id
-					       JOIN public.courses c2 ON UPPER(c2.coursecode) = UPPER(ic2.coursecode)
-					       WHERE UPPER(p2.usn) = UPPER($3)
-						 AND p2.status = p2.final_preference
-					)
-				)
-			ORDER BY eg.group_name NULLS LAST, c.coursename ASC, c.coursecode ASC`,
-		       [instance.id, student.department_id, student.usn]
-	       );
+	// fetch all historically allotted course codes for this student.
+	// treat a course as allotted when allocation_status = 'Allotted'
+	// or when legacy rows satisfy status = final_preference.
+	// these are used to validate compulsory prerequisites.
+	const allocatedRes = await pool.query(
+		`SELECT DISTINCT
+			UPPER(TRIM(ic.coursecode)) AS coursecode,
+			CAST(c.id AS TEXT) AS courseid
+		 FROM public.preferences p
+		 JOIN public.instance_courses ic ON ic.id = p.instance_course_id
+		 JOIN public.courses c ON UPPER(TRIM(c.coursecode)) = UPPER(TRIM(ic.coursecode))
+		 WHERE UPPER(p.usn) = UPPER($1)
+		   AND (
+			 UPPER(COALESCE(p.allocation_status, '')) = 'ALLOTTED'
+			 OR p.status = p.final_preference
+		   )`,
+		[student.usn]
+	);
+
+	const normalizeCode = (value) => String(value || '')
+		.toUpperCase()
+		.replace(/[\[\]{}()'"`]/g, '')
+		.replace(/\s+/g, '')
+		.trim();
+
+	const allocatedCourseCodes = allocatedRes.rows
+		.map((row) => normalizeCode(row.coursecode))
+		.filter(Boolean);
+
+	// also index by course table ID so pre_req values stored as numeric IDs (e.g. '109') match
+	const allocatedCourseIds = new Set(
+		allocatedRes.rows
+			.map((row) => String(row.courseid || '').trim())
+			.filter(Boolean)
+	);
+
+	// previous-semester allotted courses are used for restricted-course eligibility.
+	// treat a course as allotted when allocation_status = 'Allotted'
+	// or when legacy rows satisfy status = final_preference.
+	const previousAllocatedRes = previousSemester
+		? await pool.query(
+			`SELECT DISTINCT UPPER(TRIM(ic.coursecode)) AS coursecode
+			 FROM public.preferences p
+			 JOIN public.instance_courses ic ON ic.id = p.instance_course_id
+			 JOIN public.instances i_prev ON i_prev.id = ic.instance_id
+			 WHERE UPPER(p.usn) = UPPER($1)
+			   AND CAST(REGEXP_REPLACE(i_prev.semester::text, '[{}]', '', 'g') AS INTEGER) = $2
+			   AND (
+				 UPPER(COALESCE(p.allocation_status, '')) = 'ALLOTTED'
+				 OR p.status = p.final_preference
+			   )`,
+			[student.usn, previousSemester]
+		)
+		: { rows: [] };
+
+	const previousAllocatedCourseCodes = previousAllocatedRes.rows
+		.map((row) => normalizeCode(row.coursecode))
+		.filter(Boolean);
+
+	// Fetch all instance courses and evaluate eligibility in JS to keep rule behavior
+	// explicit and debuggable.
+	const coursesRes = await pool.query(
+		`SELECT
+			ic.id AS icid,
+			ic.*,
+			c.coursename,
+			c.coursecode,
+			c.pre_req,
+			c.compulsory_prereq,
+			c.department_id,
+			c.restricted,
+			eg.group_name,
+			EXISTS (
+				SELECT 1
+				FROM public.permitted_branches pb0
+				WHERE pb0.instance_course_id = ic.id
+			) AS has_branch_rules,
+			EXISTS (
+				SELECT 1
+				FROM public.permitted_branches pb
+				WHERE pb.instance_course_id = ic.id
+				  AND pb.department_id = $2
+			) AS is_department_permitted
+		 FROM public.instance_courses ic
+		 JOIN public.courses c ON UPPER(TRIM(c.coursecode)) = UPPER(TRIM(ic.coursecode))
+		 LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
+		 WHERE ic.instance_id = $1
+		 ORDER BY eg.group_name NULLS LAST, c.coursename ASC, c.coursecode ASC`,
+		[instance.id, student.department_id]
+	);
+
+	const allocatedSet = new Set(allocatedCourseCodes);
+	const previousAllocatedSet = new Set(previousAllocatedCourseCodes);
+	// prereq may be stored as course ID (e.g. '109') or course code (e.g. '22EC647')
+	const isAllocated = (code) => allocatedSet.has(code) || allocatedCourseIds.has(code);
+	const parseCodes = (value) => String(value || '')
+		.split(/[;,/|]+/)
+		.map((code) => normalizeCode(code))
+		.filter(Boolean);
 
 	const grouped = {};
+	const eligibleCourseIds = new Set();
+	const eligibilityDebug = [];
+	let targetCourseDebug = null;
 	for (const row of coursesRes.rows) {
+		const reasons = [];
+		const hasBranchRules = Boolean(row.has_branch_rules);
+		const isDepartmentPermitted = Boolean(row.is_department_permitted);
+		const isBranchEligible = !hasBranchRules || isDepartmentPermitted;
+		if (!isBranchEligible) reasons.push('not_permitted_for_department');
+
+		const isFloated = !(
+			Number(row.division || 0) === 0
+			&& Number(row.min_intake || 0) === 0
+			&& Number(row.max_intake || 0) === 0
+		);
+		if (!isFloated) reasons.push('not_floated');
+
+		const restrictedCodes = parseCodes(row.restricted);
+		const isRestrictedEligible = (
+			restrictedCodes.length === 0
+			|| !Number.isInteger(previousSemester)
+			|| !restrictedCodes.some((code) => previousAllocatedSet.has(code))
+		);
+		if (!isRestrictedEligible) reasons.push('restricted_by_previous_semester_allocation');
+
+		const compulsoryFlag = String(row.compulsory_prereq || '').trim().toLowerCase();
+		const prereqCodes = parseCodes(row.pre_req);
+		const hasCompulsoryPrerequisite = (
+			compulsoryFlag !== 'yes'
+			|| prereqCodes.length === 0
+			|| prereqCodes.every((code) => isAllocated(code))
+		);
+		if (!hasCompulsoryPrerequisite) reasons.push('missing_compulsory_prerequisite');
+		const missingPrereqCodes = prereqCodes.filter((code) => !isAllocated(code));
+
+		const isEligible = isBranchEligible && isFloated && isRestrictedEligible && hasCompulsoryPrerequisite;
+
+		if (normalizeCode(row.coursecode) === '22EC756') {
+			targetCourseDebug = {
+				coursecode: row.coursecode,
+				eligible: isEligible,
+				reasons,
+				compulsory_prereq: row.compulsory_prereq,
+				pre_req: row.pre_req,
+				parsed_prereq_codes: prereqCodes,
+				missing_prereq_codes: missingPrereqCodes,
+				restricted: row.restricted,
+				parsed_restricted_codes: restrictedCodes,
+				allocatedCourseCodes,
+				previousAllocatedCourseCodes,
+				has_branch_rules: hasBranchRules,
+				is_department_permitted: isDepartmentPermitted,
+				division: row.division,
+				min_intake: row.min_intake,
+				max_intake: row.max_intake,
+				currentSemester,
+				previousSemester
+			};
+		}
+		if (!isEligible) {
+			eligibilityDebug.push({
+				coursecode: row.coursecode,
+				coursename: row.coursename,
+				reasons,
+				missing_prereq_codes: missingPrereqCodes,
+				compulsory_prereq: row.compulsory_prereq,
+				pre_req: row.pre_req,
+				restricted: row.restricted,
+				has_branch_rules: hasBranchRules,
+				is_department_permitted: isDepartmentPermitted,
+				division: row.division,
+				min_intake: row.min_intake,
+				max_intake: row.max_intake
+			});
+			continue;
+		}
+
 		const key = row.group_name || 'No Group';
 		if (!grouped[key]) grouped[key] = [];
 		grouped[key].push(row);
+		eligibleCourseIds.add(Number(row.icid));
 	}
 
 	if (prefsRes.rowCount > 0) {
-		const eligibleCourseIds = new Set(coursesRes.rows.map((row) => Number(row.icid)));
 		const eligiblePreferences = prefsRes.rows.filter((row) => eligibleCourseIds.has(Number(row.instance_course_id)));
 		const isFullyRegistered = eligibleCourseIds.size > 0 && eligiblePreferences.length === eligibleCourseIds.size;
 
 		if (isFullyRegistered) {
-			return { registered: true, preferences: eligiblePreferences };
+			return {
+				registered: true,
+				preferences: eligiblePreferences,
+				student: {
+					id: student.id,
+					department_id: student.department_id,
+					usn: student.usn
+				},
+				allocatedCourseCodes,
+				previousAllocatedCourseCodes
+			};
 		}
 
 		return {
 			registered: false,
 			instance: { id: instance.id, instancename: instance.instancename },
 			courses: grouped,
-			existingPreferences: eligiblePreferences
+			existingPreferences: eligiblePreferences,
+			student: {
+				id: student.id,
+				department_id: student.department_id,
+				usn: student.usn
+			},
+			allocatedCourseCodes,
+			previousAllocatedCourseCodes,
+			eligibilityDebug,
+			targetCourseDebug
 		};
 	}
 
-	return { registered: false, instance: { id: instance.id, instancename: instance.instancename }, courses: grouped };
+	return {
+		registered: false,
+		instance: { id: instance.id, instancename: instance.instancename },
+		courses: grouped,
+		student: {
+			id: student.id,
+			department_id: student.department_id,
+			usn: student.usn
+		},
+		allocatedCourseCodes,
+		previousAllocatedCourseCodes,
+		eligibilityDebug,
+		targetCourseDebug
+	};
 }
 
 module.exports = {

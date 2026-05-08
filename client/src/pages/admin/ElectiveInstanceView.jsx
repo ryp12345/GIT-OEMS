@@ -133,34 +133,78 @@ export default function ElectiveInstanceViewPage() {
 	async function handleSubmit(event) {
 		event.preventDefault();
 
-		const payload = {
-			courses: courses.map((course) => ({
-				coursecode: course.coursecode,
-				division: Number(course.division || 0),
-				min_intake: Number(course.min_intake || 0),
-				max_intake: Number(course.max_intake || 0),
-				department_ids: course.department_ids.map((value) => Number(value))
-			}))
-		};
+		const partialCourses = [];
+		const completedCourses = [];
 
-		for (const course of payload.courses) {
-			if (!Number.isInteger(course.division) || course.division < 0) {
-				setError(`Division must be a non-negative integer for ${course.coursecode}`);
+		for (const course of courses) {
+			const divisionText = String(course.division ?? '').trim();
+			const minIntakeText = String(course.min_intake ?? '').trim();
+			const maxIntakeText = String(course.max_intake ?? '').trim();
+			const selectedDepartments = Array.isArray(course.department_ids) ? course.department_ids : [];
+
+			const divisionValue = Number(divisionText);
+			const minIntakeValue = Number(minIntakeText);
+			const maxIntakeValue = Number(maxIntakeText);
+
+			const hasDivision = divisionText !== '' && Number.isFinite(divisionValue) && divisionValue > 0;
+			const hasMinIntake = minIntakeText !== '' && Number.isFinite(minIntakeValue) && minIntakeValue >= 0;
+			const hasMaxIntake = maxIntakeText !== '' && Number.isFinite(maxIntakeValue) && maxIntakeValue > 0;
+			const hasDepartments = selectedDepartments.length > 0;
+
+			const isZeroOrBlankDivision = divisionText === '' || (Number.isFinite(divisionValue) && divisionValue === 0);
+			const isZeroOrBlankMin = minIntakeText === '' || (Number.isFinite(minIntakeValue) && minIntakeValue === 0);
+			const isZeroOrBlankMax = maxIntakeText === '' || (Number.isFinite(maxIntakeValue) && maxIntakeValue === 0);
+			const isRowEmpty = !hasDepartments && isZeroOrBlankDivision && isZeroOrBlankMin && isZeroOrBlankMax;
+			const isRowComplete = hasDivision && hasMinIntake && hasMaxIntake && hasDepartments;
+
+			if (isRowEmpty) {
+				continue;
+			}
+
+			if (!isRowComplete) {
+				partialCourses.push(course.coursecode);
+				continue;
+			}
+
+			const normalizedCourse = {
+				coursecode: course.coursecode,
+				division: Number(divisionText),
+				min_intake: Number(minIntakeText),
+				max_intake: Number(maxIntakeText),
+				department_ids: selectedDepartments.map((value) => Number(value))
+			};
+
+			if (!Number.isInteger(normalizedCourse.division) || normalizedCourse.division < 0) {
+				setError(`Division must be a non-negative integer for ${normalizedCourse.coursecode}`);
 				return;
 			}
-			if (!Number.isInteger(course.min_intake) || course.min_intake < 0) {
-				setError(`Minimum intake must be a non-negative integer for ${course.coursecode}`);
+			if (!Number.isInteger(normalizedCourse.min_intake) || normalizedCourse.min_intake < 0) {
+				setError(`Minimum intake must be a non-negative integer for ${normalizedCourse.coursecode}`);
 				return;
 			}
-			if (!Number.isInteger(course.max_intake) || course.max_intake < 0) {
-				setError(`Maximum intake must be a non-negative integer for ${course.coursecode}`);
+			if (!Number.isInteger(normalizedCourse.max_intake) || normalizedCourse.max_intake < 0) {
+				setError(`Maximum intake must be a non-negative integer for ${normalizedCourse.coursecode}`);
 				return;
 			}
-			if (course.max_intake < course.min_intake) {
-				setError(`Maximum intake must be greater than or equal to minimum intake for ${course.coursecode}`);
+			if (normalizedCourse.max_intake < normalizedCourse.min_intake) {
+				setError(`Maximum intake must be greater than or equal to minimum intake for ${normalizedCourse.coursecode}`);
 				return;
 			}
+
+			completedCourses.push(normalizedCourse);
 		}
+
+		if (partialCourses.length > 0) {
+			setError(`Please provide Div, Min, Max, and at least one permitted branch for: ${partialCourses.join(', ')}`);
+			return;
+		}
+
+		if (completedCourses.length === 0) {
+			setError('Please complete at least one course row before updating.');
+			return;
+		}
+
+		const payload = { courses: completedCourses };
 
 		try {
 			setIsSaving(true);

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Notification from '../../components/common/Notification';
 import { checkStudentDetails } from '../../api/student.api';
@@ -12,6 +12,25 @@ export default function CheckNamePage() {
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
   const [selectedOrder, setSelectedOrder] = useState([]);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+
+  const availableCourses = useMemo(() => {
+    return result?.courses || {};
+  }, [result]);
+
+  const totalAvailableCourses = useMemo(
+    () => Object.values(availableCourses).flat().length,
+    [availableCourses]
+  );
+
+  useEffect(() => {
+    if (!result) return;
+    const validIds = new Set(
+      Object.values(availableCourses)
+        .flat()
+        .map((course) => String(course.icid ?? course.id))
+    );
+    setSelectedOrder((prev) => prev.filter((id) => validIds.has(String(id))));
+  }, [availableCourses, result]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -104,7 +123,7 @@ export default function CheckNamePage() {
                   Student verified for {result.instance?.instancename || 'active instance'}.
                 </div>
                 <h3 className="font-semibold mb-2">Available Courses (grouped)</h3>
-                {Object.values(result.courses || {}).flat().length === 0 && (
+                {totalAvailableCourses === 0 && (
                   <div className="mb-2">No courses are listed for your branch. Contact Dean Academics Development</div>
                 )}
                 <form onSubmit={async (e) => {
@@ -114,14 +133,14 @@ export default function CheckNamePage() {
                     return;
                   }
 
-                  if (selectedOrder.length !== Object.values(result.courses || {}).flat().length) {
+                  if (selectedOrder.length !== totalAvailableCourses) {
                     setNotification({ show: true, message: 'Please select all listed courses before submitting', type: 'error' });
                     return;
                   }
 
                   setIsConfirmOpen(true);
                 }}>
-                  {Object.keys(result.courses || {}).map((grp) => (
+                  {Object.keys(availableCourses).map((grp) => (
                     <div key={grp} className="mb-4">
                       <h4 className="font-medium">{grp}</h4>
                       <div className="overflow-x-auto">
@@ -136,7 +155,7 @@ export default function CheckNamePage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {result.courses[grp].map((c) => {
+                          {availableCourses[grp].map((c) => {
                             const courseId = String(c.icid ?? c.id);
                             const idx = selectedOrder.indexOf(courseId);
                             const checked = idx >= 0;
@@ -200,7 +219,7 @@ export default function CheckNamePage() {
                           </thead>
                           <tbody>
                             {selectedOrder.map((id, idx) => {
-                              const course = Object.values(result.courses || {}).flat().find((c) => String(c.icid ?? c.id) === String(id));
+                              const course = Object.values(availableCourses).flat().find((c) => String(c.icid ?? c.id) === String(id));
                               return (
                                 <tr key={id} className="border-t">
                                   <td className="p-2">{course?.coursecode}</td>
