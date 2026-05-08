@@ -2,7 +2,7 @@ const courseModel = require('../models/course.model');
 const XLSX = require('xlsx');
 
 const VALID_SEMESTERS = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
-const VALID_YES_NO = new Set(['Yes', 'No', '']);
+const VALID_COMPLUSORY_PREREQ = new Set(['Yes', 'No', 'LearntOnly', '']);
 
 function normalizeOptionalId(value) {
 	if (value === '' || value === null || value === undefined) return null;
@@ -55,8 +55,8 @@ function normalizePayload(payload = {}) {
 		throw error;
 	}
 
-	if (!VALID_YES_NO.has(compulsory_prereq)) {
-		const error = new Error('Compulsory prerequisite must be Yes or No');
+	if (!VALID_COMPLUSORY_PREREQ.has(compulsory_prereq)) {
+		const error = new Error('Compulsory prerequisite must be Yes, No, or LearntOnly');
 		error.statusCode = 400;
 		throw error;
 	}
@@ -115,7 +115,7 @@ async function generateCourseTemplateBuffer() {
 		'CourseName',
 		'CourseCode',
 		'Prerequisites',
-		'Is Prerequesities Compulsory(1,0)',
+		'Compulsory Pre-Req Type (0:No, 1:Yes, 2:LearntOnly)',
 		'RestrictedCourseCode',
 		'Department ID',
 		'Semester'
@@ -123,7 +123,7 @@ async function generateCourseTemplateBuffer() {
 
 	XLSX.utils.sheet_add_aoa(worksheet, [
 		['1', 'POWER SYSTEM ANALYSIS AND STABILITY', '21EE61', 'Knowledge of basic electricals', '0', '', '4', '5'],
-		['2', 'POWER ELECTRONICS', '21EE62', '21EE51', '1', '21EE52', '4', '5']
+		['2', 'POWER ELECTRONICS', '21EE62', '21EE51', '2', '21EE52', '4', '5']
 	], { origin: 'A2' });
 
 	XLSX.utils.sheet_add_aoa(worksheet, [['Department ID', 'Department Name']], { origin: 'N1' });
@@ -184,13 +184,14 @@ function getRowValue(row, aliases) {
 	return '';
 }
 
-function normalizeYesNo(value) {
+function normalizeCompulsoryPrerequisite(value) {
 	const normalized = String(value || '').trim().toLowerCase();
 	if (!normalized) return 'No';
 	if (['yes', 'y', 'true', '1'].includes(normalized)) return 'Yes';
 	if (['no', 'n', 'false', '0'].includes(normalized)) return 'No';
+	if (['learntonly', 'learnt_only', 'learnedonly', 'learned_only', 'musttakeiflearnt', 'mandatory_if_learnt', '2'].includes(normalized)) return 'LearntOnly';
 
-	const error = new Error('Compulsory prerequisite must be Yes or No');
+	const error = new Error('Compulsory prerequisite must be Yes, No, or LearntOnly');
 	error.statusCode = 400;
 	throw error;
 }
@@ -342,7 +343,7 @@ async function importCoursesFromFile(fileBuffer) {
 			elective_group_id: electiveGroup ? electiveGroup.id : null,
 			pre_req: normalizedPrerequisite,
 			restricted: normalizedRestricted,
-			compulsory_prereq: normalizeYesNo(compulsoryValue)
+			compulsory_prereq: normalizeCompulsoryPrerequisite(compulsoryValue)
 		});
 
 		await ensureUniqueCourseCode(payload.coursecode);

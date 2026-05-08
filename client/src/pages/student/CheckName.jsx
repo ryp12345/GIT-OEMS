@@ -12,6 +12,11 @@ export default function CheckNamePage() {
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
   const [selectedOrder, setSelectedOrder] = useState([]);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const forcedCourseIds = useMemo(
+    () => (result?.forcedCourseIds || []).map((id) => String(id)),
+    [result]
+  );
+  const isLearntOnlyForced = forcedCourseIds.length > 0;
 
   const availableCourses = useMemo(() => {
     return result?.courses || {};
@@ -38,9 +43,12 @@ export default function CheckNamePage() {
       const res = await checkStudentDetails(values, token);
       const data = res.data || res;
       setResult(data);
-      const preselected = (data?.existingPreferences || [])
+      const preselectedFromExisting = (data?.existingPreferences || [])
         .sort((a, b) => Number(a.preferred) - Number(b.preferred))
         .map((row) => String(row.instance_course_id));
+      const preselected = (data?.forcedSelection && Array.isArray(data?.forcedCourseIds) && data.forcedCourseIds.length > 0)
+        ? data.forcedCourseIds.map((id) => String(id))
+        : preselectedFromExisting;
       setSelectedOrder(preselected);
     } catch (err) {
       setNotification({ show: true, message: err?.response?.data?.error || err?.message || 'Check failed', type: 'error' });
@@ -122,6 +130,11 @@ export default function CheckNamePage() {
                 <div className="mb-4 rounded border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
                   Student verified for {result.instance?.instancename || 'active instance'}.
                 </div>
+                {isLearntOnlyForced && (
+                  <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    Based on learnt compulsory prerequisite, only the listed compulsory course can be selected.
+                  </div>
+                )}
                 <h3 className="font-semibold mb-2">Available Courses (grouped)</h3>
                 {totalAvailableCourses === 0 && (
                   <div className="mb-2">No courses are listed for your branch. Contact Dean Academics Development</div>
@@ -168,6 +181,7 @@ export default function CheckNamePage() {
                                 <td className="p-2">{c.coursecode}</td>
                                 <td className="p-2">
                                   <input type="checkbox" className="preference_check" value={`i_${courseId}`} checked={checked} onChange={(e) => {
+                                    if (isLearntOnlyForced) return;
                                     setSelectedOrder((prev) => {
                                       const copy = [...prev];
                                       if (e.target.checked) {
@@ -178,7 +192,7 @@ export default function CheckNamePage() {
                                       }
                                       return copy;
                                     });
-                                  }} />
+                                  }} disabled={isLearntOnlyForced} />
                                 </td>
                                 <td className="p-2"> 
                                   <input className="form-control" type="text" readOnly id={`i_${courseId}`} value={checked ? idx + 1 : ''} name={`i_${courseId}`} style={{ width: '50px' }} />

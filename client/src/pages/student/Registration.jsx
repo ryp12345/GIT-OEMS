@@ -14,9 +14,11 @@ export default function StudentRegistrationPage() {
   const [courses, setCourses] = useState([]);
   const [registeredPreferences, setRegisteredPreferences] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState([]);
+  const [forcedCourseIds, setForcedCourseIds] = useState([]);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isSavingPreferences, setIsSavingPreferences] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
+  const isLearntOnlyForced = forcedCourseIds.length > 0;
 
   useEffect(() => {
     const state = location?.state || {};
@@ -67,11 +69,13 @@ export default function StudentRegistrationPage() {
         setRegisteredPreferences(data.preferences || []);
         setCourses([]);
         setSelectedOrder([]);
+        setForcedCourseIds((data.forcedCourseIds || []).map((id) => String(id)));
       } else {
         if (!data.instance) {
           setRegisteredPreferences(null);
           setCourses([]);
           setShowCourses(false);
+          setForcedCourseIds([]);
           setNotification({ show: true, message: data.message || 'No active elective instance for your semester', type: 'error' });
           return;
         }
@@ -87,9 +91,13 @@ export default function StudentRegistrationPage() {
           .sort((a, b) => Number(a.preferred) - Number(b.preferred))
           .map((row) => String(row.instance_course_id))
           .filter((id) => validCourseIds.has(id));
+        const normalizedForced = (data.forcedCourseIds || [])
+          .map((id) => String(id))
+          .filter((id) => validCourseIds.has(id));
         setRegisteredPreferences(null);
         setCourses(flat);
-        setSelectedOrder(preselected);
+        setForcedCourseIds(normalizedForced);
+        setSelectedOrder(normalizedForced.length > 0 ? normalizedForced : preselected);
       }
       // setShowBasic(false); // Keep basic details and Proceed button visible
       setShowCourses(true);
@@ -148,6 +156,7 @@ export default function StudentRegistrationPage() {
         setRegisteredPreferences(refreshedData.preferences || []);
         setCourses([]);
         setSelectedOrder([]);
+        setForcedCourseIds((refreshedData.forcedCourseIds || []).map((id) => String(id)));
       }
 
       setIsConfirmOpen(false);
@@ -229,6 +238,11 @@ export default function StudentRegistrationPage() {
         {showCourses && !registeredPreferences && (
           <form onSubmit={handleSubmit} className="rounded-lg bg-white p-4 shadow">
             <h3 className="font-semibold mb-3">Available Courses</h3>
+            {isLearntOnlyForced && (
+              <div className="mb-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Based on learnt compulsory prerequisite, only the listed compulsory course can be selected.
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="min-w-full table-auto">
                 <thead>
@@ -251,7 +265,7 @@ export default function StudentRegistrationPage() {
                     <tr key={courseId} className="border-t">
                       <td className="p-2">{groupName}</td>
                       <td className="p-2">
-                        <input type="checkbox" checked={checked} onChange={(e) => handleCheckChange(courseId, e.target.checked)} />
+                        <input type="checkbox" checked={checked} disabled={isLearntOnlyForced} onChange={(e) => handleCheckChange(courseId, e.target.checked)} />
                       </td>
                       <td className="p-2">{c.coursecode}</td>
                       <td className="p-2">{c.coursename}</td>

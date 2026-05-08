@@ -625,6 +625,7 @@ async function checkName(payload = {}) {
 
 	const grouped = {};
 	const eligibleCourseIds = new Set();
+	const learntOnlyEligibleCourses = [];
 	const eligibilityDebug = [];
 	let targetCourseDebug = null;
 	for (const row of coursesRes.rows) {
@@ -651,12 +652,22 @@ async function checkName(payload = {}) {
 
 		const compulsoryFlag = String(row.compulsory_prereq || '').trim().toLowerCase();
 		const prereqCodes = parseCodes(row.pre_req);
-		const hasCompulsoryPrerequisite = (
-			compulsoryFlag !== 'yes'
-			|| prereqCodes.length === 0
+		const hasSatisfiedPrerequisite = (
+			prereqCodes.length === 0
 			|| prereqCodes.every((code) => isAllocated(code))
 		);
-		if (!hasCompulsoryPrerequisite) reasons.push('missing_compulsory_prerequisite');
+		const hasCompulsoryPrerequisite = (
+			compulsoryFlag === 'yes'
+				? hasSatisfiedPrerequisite
+				: compulsoryFlag === 'learntonly'
+					? hasSatisfiedPrerequisite
+					: true
+		);
+		if (!hasCompulsoryPrerequisite) {
+			reasons.push(compulsoryFlag === 'learntonly'
+				? 'missing_learnt_only_prerequisite'
+				: 'missing_compulsory_prerequisite');
+		}
 		const missingPrereqCodes = prereqCodes.filter((code) => !isAllocated(code));
 
 		const isEligible = isBranchEligible && isFloated && isRestrictedEligible && hasCompulsoryPrerequisite;
@@ -701,20 +712,42 @@ async function checkName(payload = {}) {
 			continue;
 		}
 
+		if (compulsoryFlag === 'learntonly' && hasSatisfiedPrerequisite) {
+			learntOnlyEligibleCourses.push(row);
+		}
+
 		const key = row.group_name || 'No Group';
 		if (!grouped[key]) grouped[key] = [];
 		grouped[key].push(row);
 		eligibleCourseIds.add(Number(row.icid));
 	}
 
+	let finalGrouped = grouped;
+	let finalEligibleCourseIds = new Set(eligibleCourseIds);
+	if (learntOnlyEligibleCourses.length > 0) {
+		finalGrouped = {};
+		finalEligibleCourseIds = new Set();
+		for (const row of learntOnlyEligibleCourses) {
+			const key = row.group_name || 'No Group';
+			if (!finalGrouped[key]) finalGrouped[key] = [];
+			finalGrouped[key].push(row);
+			finalEligibleCourseIds.add(Number(row.icid));
+		}
+	}
+
+	const forcedCourseIds = learntOnlyEligibleCourses.map((row) => Number(row.icid));
+	const forcedSelection = forcedCourseIds.length > 0;
+
 	if (prefsRes.rowCount > 0) {
-		const eligiblePreferences = prefsRes.rows.filter((row) => eligibleCourseIds.has(Number(row.instance_course_id)));
-		const isFullyRegistered = eligibleCourseIds.size > 0 && eligiblePreferences.length === eligibleCourseIds.size;
+		const eligiblePreferences = prefsRes.rows.filter((row) => finalEligibleCourseIds.has(Number(row.instance_course_id)));
+		const isFullyRegistered = finalEligibleCourseIds.size > 0 && eligiblePreferences.length === finalEligibleCourseIds.size;
 
 		if (isFullyRegistered) {
 			return {
 				registered: true,
 				preferences: eligiblePreferences,
+				forcedSelection,
+				forcedCourseIds,
 				student: {
 					id: student.id,
 					department_id: student.department_id,
@@ -728,8 +761,10 @@ async function checkName(payload = {}) {
 		return {
 			registered: false,
 			instance: { id: instance.id, instancename: instance.instancename },
-			courses: grouped,
+			courses: finalGrouped,
 			existingPreferences: eligiblePreferences,
+			forcedSelection,
+			forcedCourseIds,
 			student: {
 				id: student.id,
 				department_id: student.department_id,
@@ -745,7 +780,9 @@ async function checkName(payload = {}) {
 	return {
 		registered: false,
 		instance: { id: instance.id, instancename: instance.instancename },
-		courses: grouped,
+		courses: finalGrouped,
+		forcedSelection,
+		forcedCourseIds,
 		student: {
 			id: student.id,
 			department_id: student.department_id,

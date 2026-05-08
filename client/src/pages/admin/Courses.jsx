@@ -13,7 +13,7 @@ import {
 } from '../../api/course.api';
 
 const semesterOptions = ['1', '2', '3', '4', '5', '6', '7', '8'];
-const yesNoOptions = ['No', 'Yes'];
+const compulsoryPrereqOptions = ['No', 'Yes', 'LearntOnly'];
 const PAGE_SIZE = 10;
 
 const initialFormState = {
@@ -255,8 +255,8 @@ export default function CoursesPage() {
 			return;
 		}
 
-		if (!yesNoOptions.includes(formState.compulsory_prereq)) {
-			setError('Please select compulsory prerequisite as Yes or No');
+		if (!compulsoryPrereqOptions.includes(formState.compulsory_prereq)) {
+			setError('Please select compulsory prerequisite as No, Yes, or LearntOnly');
 			return;
 		}
 
@@ -594,17 +594,18 @@ export default function CoursesPage() {
 														</select>
 													</div>
 
-													<div className="md:col-span-1 flex items-center">
-														<label className="inline-flex items-center gap-3 text-sm font-medium text-gray-700 pt-7">
-															<input
-																type="checkbox"
-																name="compulsory_prereq"
-																checked={formState.compulsory_prereq === 'Yes'}
-																onChange={handleFieldChange}
-																className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-															/>
-															<span>Compulsory Pre-Requisite</span>
-														</label>
+													<div className="md:col-span-1">
+														<label className="block mb-2 text-sm font-medium text-gray-700">Compulsory Pre-Requisite Type</label>
+														<select
+															name="compulsory_prereq"
+															value={formState.compulsory_prereq}
+															onChange={handleFieldChange}
+															className="block w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+														>
+															{compulsoryPrereqOptions.map((option) => (
+																<option key={option} value={option}>{option}</option>
+															))}
+														</select>
 													</div>
 
 													{formState.pre_req === '-1' ? (
