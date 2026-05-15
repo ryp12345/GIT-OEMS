@@ -23,7 +23,7 @@ async function listStudents(instanceId, prefStatus = null) {
 		? `INNER JOIN LATERAL (
 			SELECT semester, grade
 			FROM public.student_academic_records sar
-			WHERE UPPER(sar.usn) = UPPER(s.usn)
+			WHERE LOWER(REGEXP_REPLACE(sar.usn, '\\s+', '', 'g')) = LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
 			  AND sar.instance_id = $1
 			ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
 			LIMIT 1
@@ -31,7 +31,7 @@ async function listStudents(instanceId, prefStatus = null) {
 		: `LEFT JOIN LATERAL (
 			SELECT semester, grade
 			FROM public.student_academic_records sar
-			WHERE UPPER(sar.usn) = UPPER(s.usn)
+			WHERE LOWER(REGEXP_REPLACE(sar.usn, '\\s+', '', 'g')) = LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
 			ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
 			LIMIT 1
 		 ) ar ON TRUE`;
@@ -49,14 +49,14 @@ async function listStudents(instanceId, prefStatus = null) {
 				SELECT 1 FROM public.preferences p
 				JOIN public.instance_courses ic ON ic.id = p.instance_course_id
 				WHERE ic.instance_id = $1
-				  AND LOWER(p.usn) = LOWER(s.usn)
+				  AND LOWER(REGEXP_REPLACE(p.usn, '\\s+', '', 'g')) = LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
 			)`;
 		} else if (String(prefStatus).toLowerCase() === 'pending') {
 			whereClause = `WHERE NOT EXISTS (
 				SELECT 1 FROM public.preferences p
 				JOIN public.instance_courses ic ON ic.id = p.instance_course_id
 				WHERE ic.instance_id = $1
-				  AND LOWER(p.usn) = LOWER(s.usn)
+				  AND LOWER(REGEXP_REPLACE(p.usn, '\\s+', '', 'g')) = LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
 			)`;
 		}
 	}

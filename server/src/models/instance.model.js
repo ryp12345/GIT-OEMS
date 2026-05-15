@@ -180,18 +180,7 @@ async function setPreferenceFormStatusById(id, enabled) {
 
 async function getPreferenceStatisticsByInstance(instanceId) {
 	const result = await pool.query(
-		`WITH instance_courses AS (
-			SELECT id
-			FROM public.instance_courses
-			WHERE instance_id = $1
-		),
-		submitted_students AS (
-			SELECT DISTINCT LOWER(REGEXP_REPLACE(p.usn, '\\s+', '', 'g')) AS usn_key
-			FROM public.preferences p
-			JOIN instance_courses ic ON ic.id = p.instance_course_id
-			WHERE p.preferred = 1
-		),
-		eligible_students AS (
+		`WITH eligible_students AS (
 			SELECT
 				s.department_id,
 				LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g')) AS usn_key
@@ -202,41 +191,26 @@ async function getPreferenceStatisticsByInstance(instanceId) {
 				WHERE sar.instance_id = $1
 				  AND LOWER(REGEXP_REPLACE(sar.usn, '\\s+', '', 'g')) = LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
 			)
-			OR LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g')) IN (SELECT usn_key FROM submitted_students)
 			GROUP BY s.department_id, LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
+		),
+		submitted_students AS (
+			SELECT DISTINCT LOWER(REGEXP_REPLACE(p.usn, '\\s+', '', 'g')) AS usn_key
+			FROM public.preferences p
+			JOIN public.instance_courses ic ON ic.id = p.instance_course_id
+			WHERE ic.instance_id = $1
 		)
-		SELECT id, department, total_students, submitted, pending FROM (
-			SELECT
-				d.deptid AS id,
-				d.shortname AS department,
-				COUNT(DISTINCT es.usn_key) AS total_students,
-				COUNT(DISTINCT CASE WHEN ss.usn_key IS NOT NULL THEN es.usn_key END) AS submitted,
-				COUNT(DISTINCT es.usn_key) - COUNT(DISTINCT CASE WHEN ss.usn_key IS NOT NULL THEN es.usn_key END) AS pending,
-				1 AS sort_order
-			FROM public.departments d
-			LEFT JOIN eligible_students es ON es.department_id = d.deptid
-			LEFT JOIN submitted_students ss ON ss.usn_key = es.usn_key
-			WHERE d.deptid IN (SELECT DISTINCT department_id FROM public.students)
-			GROUP BY d.deptid, d.shortname
-
-			UNION ALL
-
-			-- Students who submitted but have no matching record in the students table
-			SELECT
-				-1 AS id,
-				'Unassigned' AS department,
-				COUNT(DISTINCT ss.usn_key) AS total_students,
-				COUNT(DISTINCT ss.usn_key) AS submitted,
-				0 AS pending,
-				2 AS sort_order
-			FROM submitted_students ss
-			WHERE NOT EXISTS (
-				SELECT 1 FROM public.students s
-				WHERE LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g')) = ss.usn_key
-			)
-			HAVING COUNT(DISTINCT ss.usn_key) > 0
-		) combined
-		ORDER BY sort_order ASC, department ASC`,
+		SELECT
+			d.deptid AS id,
+			d.shortname AS department,
+			COUNT(DISTINCT es.usn_key) AS total_students,
+			COUNT(DISTINCT CASE WHEN ss.usn_key IS NOT NULL THEN es.usn_key END) AS submitted,
+			COUNT(DISTINCT es.usn_key) - COUNT(DISTINCT CASE WHEN ss.usn_key IS NOT NULL THEN es.usn_key END) AS pending
+		FROM public.departments d
+		LEFT JOIN eligible_students es ON es.department_id = d.deptid
+		LEFT JOIN submitted_students ss ON ss.usn_key = es.usn_key
+		WHERE d.deptid IN (SELECT DISTINCT department_id FROM public.students)
+		GROUP BY d.deptid, d.shortname
+		ORDER BY department ASC`,
 		[instanceId]
 	);
 
