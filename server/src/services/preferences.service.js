@@ -107,6 +107,32 @@ async function validateLearntOnlyCompulsoryPreferences(preferences) {
 	}
 }
 
+async function validatePreferencesInstanceIsActive(preferences) {
+	const submittedIds = preferences.map((pref) => Number(pref.instance_course_id));
+
+	const result = await pool.query(
+		`SELECT i.id, i.status
+		 FROM public.instances i
+		 JOIN public.instance_courses ic ON ic.instance_id = i.id
+		 WHERE ic.id = ANY($1::int[])
+		 GROUP BY i.id, i.status`,
+		[submittedIds]
+	);
+
+	if (result.rowCount !== 1) {
+		const error = new Error('All preferences must belong to a single instance');
+		error.statusCode = 400;
+		throw error;
+	}
+
+	const status = String(result.rows[0].status || '').trim().toLowerCase();
+	if (status !== 'active') {
+		const error = new Error('Elective registration is currently closed for this instance');
+		error.statusCode = 403;
+		throw error;
+	}
+}
+
 async function submitPreferences(payload = {}) {
 	const preferences = Array.isArray(payload.preferences) ? payload.preferences : [];
 
@@ -136,6 +162,7 @@ async function submitPreferences(payload = {}) {
 		}
 	}
 
+	await validatePreferencesInstanceIsActive(preferences);
 	await validateLearntOnlyCompulsoryPreferences(preferences);
 
 	await preferencesModel.insertPreferences(preferences);

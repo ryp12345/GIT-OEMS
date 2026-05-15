@@ -1,11 +1,10 @@
 const pool = require('../config/db');
 
-async function listStudents(instanceId) {
-	let query;
-	let params;
+async function listStudents(instanceId, prefStatus = null) {
+	// prefStatus: null | 'submitted' | 'pending'
+	const hasInstance = Boolean(instanceId && Number.isInteger(Number(instanceId)));
 
-	if (instanceId) {
-		query = `SELECT s.id,
+	const baseSelect = `SELECT s.id,
 				s.name,
 				s.email,
 				s.uid,
@@ -18,42 +17,53 @@ async function listStudents(instanceId) {
 				s.created_at,
 				s.updated_at
 		 FROM public.students s
-		 LEFT JOIN public.departments d ON d.deptid = s.department_id
-		 INNER JOIN LATERAL (
-		 	SELECT semester, grade
-		 	FROM public.student_academic_records sar
-		 	WHERE UPPER(sar.usn) = UPPER(s.usn)
-		 	  AND sar.instance_id = $1
-		 	ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
-		 	LIMIT 1
-		 ) ar ON TRUE
-		 ORDER BY s.id DESC`;
-		params = [Number(instanceId)];
-	} else {
-		query = `SELECT s.id,
-				s.name,
-				s.email,
-				s.uid,
-				s.usn,
-				s.department_id,
-				d.name AS department_name,
-				d.shortname AS department_shortname,
-				ar.semester,
-				ar.grade AS cgpa,
-				s.created_at,
-				s.updated_at
-		 FROM public.students s
-		 LEFT JOIN public.departments d ON d.deptid = s.department_id
-		 LEFT JOIN LATERAL (
-		 	SELECT semester, grade
-		 	FROM public.student_academic_records sar
-		 	WHERE UPPER(sar.usn) = UPPER(s.usn)
-		 	ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
-		 	LIMIT 1
-		 ) ar ON TRUE
-		 ORDER BY s.id DESC`;
-		params = [];
+		 LEFT JOIN public.departments d ON d.deptid = s.department_id`;
+
+	const lateralAcademic = hasInstance
+		? `INNER JOIN LATERAL (
+			SELECT semester, grade
+			FROM public.student_academic_records sar
+			WHERE UPPER(sar.usn) = UPPER(s.usn)
+			  AND sar.instance_id = $1
+			ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
+			LIMIT 1
+		 ) ar ON TRUE`
+		: `LEFT JOIN LATERAL (
+			SELECT semester, grade
+			FROM public.student_academic_records sar
+			WHERE UPPER(sar.usn) = UPPER(s.usn)
+			ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
+			LIMIT 1
+		 ) ar ON TRUE`;
+
+	let whereClause = '';
+	const params = [];
+
+	if (hasInstance) {
+		params.push(Number(instanceId));
 	}
+
+	if (prefStatus && hasInstance) {
+		if (String(prefStatus).toLowerCase() === 'submitted') {
+			whereClause = `WHERE EXISTS (
+				SELECT 1 FROM public.preferences p
+				JOIN public.instance_courses ic ON ic.id = p.instance_course_id
+				WHERE ic.instance_id = $1
+				  AND LOWER(p.usn) = LOWER(s.usn)
+			)`;
+		} else if (String(prefStatus).toLowerCase() === 'pending') {
+			whereClause = `WHERE NOT EXISTS (
+				SELECT 1 FROM public.preferences p
+				JOIN public.instance_courses ic ON ic.id = p.instance_course_id
+				WHERE ic.instance_id = $1
+				  AND LOWER(p.usn) = LOWER(s.usn)
+			)`;
+		}
+	}
+
+	const orderBy = 'ORDER BY s.id DESC';
+
+	const query = `${baseSelect} ${lateralAcademic} ${whereClause} ${orderBy}`;
 
 	const result = await pool.query(query, params);
 	return result.rows;

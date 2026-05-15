@@ -4,10 +4,13 @@ const tokenHeaders = (token) => {
 	return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-export function getStudents(token, instanceId) {
+export function getStudents(token, instanceId, prefStatus) {
+	const params = {};
+	if (instanceId) params.instance_id = instanceId;
+	if (prefStatus) params.pref_status = prefStatus;
 	return api.get('/students', {
 		headers: tokenHeaders(token),
-		params: instanceId ? { instance_id: instanceId } : undefined
+		params: Object.keys(params).length ? params : undefined
 	});
 }
 

@@ -467,6 +467,28 @@ useEffect(() => {
 											<p className="font-semibold">Manage Students</p>
 											<p className="text-xs opacity-90">Add, edit, and import students</p>
 										</button>
+										<button
+											type="button"
+											onClick={() => {
+												if (!activeInstanceId) return showNotification('Select an active instance first', 'error');
+												navigate(`/students?pref_status=submitted&instance_id=${activeInstanceId}`);
+											}}
+											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+										>
+											<p className="font-semibold">Submitted Students</p>
+											<p className="text-xs opacity-90">View students who submitted preferences</p>
+										</button>
+										<button
+											type="button"
+											onClick={() => {
+												if (!activeInstanceId) return showNotification('Select an active instance first', 'error');
+												navigate(`/students?pref_status=pending&instance_id=${activeInstanceId}`);
+											}}
+											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+										>
+											<p className="font-semibold">Pending Students</p>
+											<p className="text-xs opacity-90">View students who haven't submitted</p>
+										</button>
 										{/* <button
 											type="button"
 											onClick={() => navigate('/elective-instance')}
@@ -556,7 +578,7 @@ useEffect(() => {
 															Close
 														</button>
 														<a
-															href="/registration.php"
+															href="/student/registration"
 															target="_blank"
 															rel="noreferrer"
 															className="mt-3 w-full inline-flex justify-center rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 sm:mt-0 sm:w-auto"

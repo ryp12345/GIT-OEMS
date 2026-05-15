@@ -68,7 +68,7 @@ exports.getPreferenceStatisticsDetails = async (req, res, next) => {
 		const strictSarJoinRaw = String(req.query.strictSarJoin || '').toLowerCase();
 		const strictSarJoin = strictSarJoinRaw
 			? !['0', 'false', 'no', 'off'].includes(strictSarJoinRaw)
-			: true;
+			: false;
 		const data = await instanceService.getPreferenceStatisticsDetails(req.params.id, { strictSarJoin });
 		res.json(data);
 	} catch (error) {

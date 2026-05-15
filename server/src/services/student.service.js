@@ -130,8 +130,8 @@ async function ensureUniqueStudentFields(student, excludedId = null) {
 	}
 }
 
-async function getStudents(instanceId) {
-	return studentModel.listStudents(instanceId || null);
+async function getStudents(instanceId, prefStatus = null) {
+	return studentModel.listStudents(instanceId || null, prefStatus);
 }
 
 async function getStudentMeta() {
@@ -502,6 +502,21 @@ async function checkName(payload = {}) {
 		[String(Number(academic.semester))]
 	);
 	if (instRes.rowCount === 0) {
+		const inactiveRes = await pool.query(
+			`SELECT id
+			 FROM public.instances
+			 WHERE (
+		 		semester::text = $1
+		 		OR semester::text = ('{' || $1 || '}')
+			 )
+			 LIMIT 1`,
+			[String(Number(academic.semester))]
+		);
+
+		if (inactiveRes.rowCount > 0) {
+			return { message: 'Elective registration is currently disabled for your semester', instance: null };
+		}
+
 		return { message: 'No active instance for student semester', instance: null };
 	}
 

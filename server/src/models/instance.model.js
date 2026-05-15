@@ -179,69 +179,78 @@ async function setPreferenceFormStatusById(id, enabled) {
 }
 
 async function getPreferenceStatisticsByInstance(instanceId) {
-	       /* const result = await pool.query(
-		       `SELECT
-			       d.deptid AS id,
-			       d.shortname AS department,
-			       COUNT(DISTINCT s.usn) AS total_students,
-			       COUNT(DISTINCT p.usn) AS submitted,
-			       COUNT(DISTINCT s.usn) - COUNT(DISTINCT p.usn) AS pending
-		       FROM public.departments d
-		       LEFT JOIN public.students s ON s.department_id = d.deptid
-			       AND s.usn IN (
-				       SELECT usn
-				       FROM public.student_academic_records sar
-				       WHERE CAST(sar.semester AS INTEGER) = (
-					       SELECT semester FROM public.instances WHERE id = $1
-				       )
-			       )
-		       LEFT JOIN public.preferences p ON p.usn = s.usn
-			       AND p.instance_course_id IN (
-				       SELECT ic.id
-				       FROM public.instance_courses ic
-				       WHERE ic.instance_id = $1
-			       )
-		       WHERE d.deptid IN (SELECT DISTINCT department_id FROM public.students)
-		       GROUP BY d.deptid, d.shortname
-		       ORDER BY d.shortname ASC`,
-		       [instanceId]
-	       ); */
-			const result = await pool.query(
-		       `SELECT
-			       d.deptid AS id,
-			       d.shortname AS department,
-			       COUNT(DISTINCT s.usn) AS total_students,
-			       COUNT(DISTINCT p.usn) AS submitted,
-			       COUNT(DISTINCT s.usn) - COUNT(DISTINCT p.usn) AS pending
-		       FROM public.departments d
-		       LEFT JOIN public.students s ON s.department_id = d.deptid
-			       AND LOWER(s.usn) IN (
-				       SELECT LOWER(usn)
-				       FROM public.student_academic_records sar
-				       WHERE sar.instance_id = $1
-			       )
-		       LEFT JOIN public.preferences p ON LOWER(p.usn) = LOWER(s.usn)
-			       AND p.instance_course_id IN (
-				       SELECT ic.id
-				       FROM public.instance_courses ic
-				       WHERE ic.instance_id = $1
-			       )
-		       WHERE d.deptid IN (SELECT DISTINCT department_id FROM public.students)
-		       GROUP BY d.deptid, d.shortname
-		       ORDER BY d.shortname ASC`,
-		       [instanceId]
-	       );
-	       return result.rows.map((row, index) => ({
-		       slNo: index + 1,
-		       department: row.department,
-		       submitted: Number(row.submitted) || 0,
-		       pending: Number(row.pending) || 0,
-		       total: Number(row.total_students) || 0
-	       }));
-	}
+	const result = await pool.query(
+		`WITH instance_courses AS (
+			SELECT id
+			FROM public.instance_courses
+			WHERE instance_id = $1
+		),
+		submitted_students AS (
+			SELECT DISTINCT LOWER(REGEXP_REPLACE(p.usn, '\\s+', '', 'g')) AS usn_key
+			FROM public.preferences p
+			JOIN instance_courses ic ON ic.id = p.instance_course_id
+			WHERE p.preferred = 1
+		),
+		eligible_students AS (
+			SELECT
+				s.department_id,
+				LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g')) AS usn_key
+			FROM public.students s
+			WHERE EXISTS (
+				SELECT 1
+				FROM public.student_academic_records sar
+				WHERE sar.instance_id = $1
+				  AND LOWER(REGEXP_REPLACE(sar.usn, '\\s+', '', 'g')) = LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
+			)
+			OR LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g')) IN (SELECT usn_key FROM submitted_students)
+			GROUP BY s.department_id, LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
+		)
+		SELECT id, department, total_students, submitted, pending FROM (
+			SELECT
+				d.deptid AS id,
+				d.shortname AS department,
+				COUNT(DISTINCT es.usn_key) AS total_students,
+				COUNT(DISTINCT CASE WHEN ss.usn_key IS NOT NULL THEN es.usn_key END) AS submitted,
+				COUNT(DISTINCT es.usn_key) - COUNT(DISTINCT CASE WHEN ss.usn_key IS NOT NULL THEN es.usn_key END) AS pending,
+				1 AS sort_order
+			FROM public.departments d
+			LEFT JOIN eligible_students es ON es.department_id = d.deptid
+			LEFT JOIN submitted_students ss ON ss.usn_key = es.usn_key
+			WHERE d.deptid IN (SELECT DISTINCT department_id FROM public.students)
+			GROUP BY d.deptid, d.shortname
+
+			UNION ALL
+
+			-- Students who submitted but have no matching record in the students table
+			SELECT
+				-1 AS id,
+				'Unassigned' AS department,
+				COUNT(DISTINCT ss.usn_key) AS total_students,
+				COUNT(DISTINCT ss.usn_key) AS submitted,
+				0 AS pending,
+				2 AS sort_order
+			FROM submitted_students ss
+			WHERE NOT EXISTS (
+				SELECT 1 FROM public.students s
+				WHERE LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g')) = ss.usn_key
+			)
+			HAVING COUNT(DISTINCT ss.usn_key) > 0
+		) combined
+		ORDER BY sort_order ASC, department ASC`,
+		[instanceId]
+	);
+
+	return result.rows.map((row, index) => ({
+		slNo: index + 1,
+		department: row.department,
+		submitted: Number(row.submitted) || 0,
+		pending: Number(row.pending) || 0,
+		total: Number(row.total_students) || 0
+	}));
+}
 
 async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}) {
-	const strictSarJoin = options.strictSarJoin !== false;
+	const strictSarJoin = options.strictSarJoin === true;
 	const sarJoinType = strictSarJoin ? 'JOIN' : 'LEFT JOIN';
 
 	const calculateMedian = (grades) => {
@@ -279,9 +288,9 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 		JOIN public.instance_courses ic ON p.instance_course_id = ic.id
 		JOIN public.instances i ON i.id = ic.instance_id
 		JOIN public.courses c ON UPPER(ic.coursecode) = UPPER(c.coursecode)
-		JOIN public.students s ON p.usn = s.usn
+		LEFT JOIN public.students s ON LOWER(p.usn) = LOWER(s.usn)
 		${sarJoinType} public.student_academic_records sar
-			ON s.usn = sar.usn
+			ON LOWER(COALESCE(s.usn, p.usn)) = LOWER(sar.usn)
 			AND sar.instance_id = i.id
 			AND CAST(sar.semester AS INTEGER) = CAST(c.semester AS INTEGER)
 		WHERE i.id = $1
@@ -382,18 +391,23 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 		 }
 
 		 if (!course.preferences.has(pref)) {
-			 course.preferences.set(pref, []);
+			 course.preferences.set(pref, { count: 0, grades: [] });
 		 }
+
+		const prefStats = course.preferences.get(pref);
+		prefStats.count += 1;
 
 		 const gradeNum = row.grade == null || row.grade === '' ? null : Number(row.grade);
 		 if (gradeNum != null && Number.isFinite(gradeNum)) {
-			 course.preferences.get(pref).push(gradeNum);
+			 prefStats.grades.push(gradeNum);
 		 }
 	 }
 
 	 const rows = Array.from(statsByCourse.values()).map((course) => {
-		 const p1Grades = course.preferences.get(1) || [];
-		 const p2Grades = course.preferences.get(2) || [];
+		 const p1Stats = course.preferences.get(1) || { count: 0, grades: [] };
+		 const p2Stats = course.preferences.get(2) || { count: 0, grades: [] };
+		 const p1Grades = p1Stats.grades;
+		 const p2Grades = p2Stats.grades;
 
 		 const key = course.instance_course_id;
 		 const rangeMap = chartByCourse.get(key) || new Map();
@@ -406,8 +420,8 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 			 borderWidth: 1
 		 }));
 
-		 const p1Count = p1Grades.length;
-		 const p2Count = p2Grades.length;
+		 const p1Count = p1Stats.count;
+		 const p2Count = p2Stats.count;
 		 const p1Min = p1Count > 0 ? Math.min(...p1Grades) : null;
 		 const p1Max = p1Count > 0 ? Math.max(...p1Grades) : null;
 		 const p2Min = p2Count > 0 ? Math.min(...p2Grades) : null;

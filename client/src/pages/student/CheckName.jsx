@@ -58,8 +58,13 @@ export default function CheckNamePage() {
   function formatServerMessage(msg) {
     if (!msg) return '';
     const m = String(msg).toLowerCase();
-    if (m.includes('no active instance') || m.includes('deadline')) {
-      return 'The Deadline to fill out the preferences is over. The Allocation Process will be initiated soon.';
+    if (
+      m.includes('no active instance')
+      || m.includes('deadline')
+      || m.includes('registration is currently disabled')
+      || m.includes('registration is currently closed')
+    ) {
+      return 'Elective preference is closed. Preference submission is disabled.';
     }
     if (m.includes('student not found') || m.includes('not found with')) {
       return 'No student found with the given details.';
@@ -68,6 +73,16 @@ export default function CheckNamePage() {
       return 'Academic record not found for student.';
     }
     return msg;
+  }
+
+  function isRegistrationClosedMessage(msg) {
+    const m = String(msg || '').toLowerCase();
+    return (
+      m.includes('no active instance')
+      || m.includes('deadline')
+      || m.includes('registration is currently disabled')
+      || m.includes('registration is currently closed')
+    );
   }
 
   return (
@@ -90,9 +105,9 @@ export default function CheckNamePage() {
         {result && (
           <div className="rounded-lg bg-slate-50 p-4 shadow">
             {!result.instance && result.message ? (
-              <h3 className={formatServerMessage(result.message).includes('No student') ? 'text-danger' : 'text-bold'}>
+              <div className={`rounded border p-3 text-sm ${isRegistrationClosedMessage(result.message) ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-700'}`}>
                 {formatServerMessage(result.message)}
-              </h3>
+              </div>
             ) : result.registered ? (
               <>
                 <h3 className="font-semibold mb-2">Existing Preferences</h3>
@@ -255,7 +270,12 @@ export default function CheckNamePage() {
                             setNotification({ show: true, message: 'Preferences saved', type: 'success' });
                             setIsConfirmOpen(false);
                           } catch (err) {
-                            setNotification({ show: true, message: err?.response?.data?.error || err?.message || 'Failed to save', type: 'error' });
+                            const errorMessage = err?.response?.data?.error || err?.message || 'Failed to save';
+                            if (isRegistrationClosedMessage(errorMessage)) {
+                              setResult({ instance: null, message: errorMessage });
+                              setIsConfirmOpen(false);
+                            }
+                            setNotification({ show: true, message: formatServerMessage(errorMessage), type: 'error' });
                           }
                         }} className="rounded bg-blue-600 px-4 py-2 text-white">Confirm</button>
                       </div>

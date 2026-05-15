@@ -18,7 +18,23 @@ export default function StudentRegistrationPage() {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isSavingPreferences, setIsSavingPreferences] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
+  const [registrationNotice, setRegistrationNotice] = useState('');
   const isLearntOnlyForced = forcedCourseIds.length > 0;
+
+  function formatRegistrationMessage(message) {
+    const source = String(message || '').trim();
+    const normalized = source.toLowerCase();
+
+    if (
+      normalized.includes('registration is currently disabled')
+      || normalized.includes('registration is currently closed')
+      || normalized.includes('no active instance')
+    ) {
+      return 'Elective preference is closed for now. Please contact admin.';
+    }
+
+    return source;
+  }
 
   useEffect(() => {
     const state = location?.state || {};
@@ -57,13 +73,15 @@ export default function StudentRegistrationPage() {
   }, [courses, selectedOrder]);
 
   async function handleProceed() {
-    if (!basic.usn || !basic.uid || !basic.name) {
+    const trimmedUsn = basic.usn.trim();
+    if (!trimmedUsn || !basic.uid || !basic.name) {
       setNotification({ show: true, message: 'Please fill basic details', type: 'error' });
       return;
     }
 
     try {
-      const res = await checkStudentDetails({ uid1: basic.uid, name1: basic.name, usn: basic.usn }, token);
+      setRegistrationNotice('');
+      const res = await checkStudentDetails({ uid1: basic.uid, name1: basic.name, usn: trimmedUsn }, token);
       const data = res?.data || {};
       if (data.registered) {
         setRegisteredPreferences(data.preferences || []);
@@ -72,11 +90,13 @@ export default function StudentRegistrationPage() {
         setForcedCourseIds((data.forcedCourseIds || []).map((id) => String(id)));
       } else {
         if (!data.instance) {
+          const formattedMessage = formatRegistrationMessage(data.message || 'No active elective instance for your semester');
           setRegisteredPreferences(null);
           setCourses([]);
           setShowCourses(false);
           setForcedCourseIds([]);
-          setNotification({ show: true, message: data.message || 'No active elective instance for your semester', type: 'error' });
+          setRegistrationNotice(formattedMessage);
+          setNotification({ show: true, message: formattedMessage, type: 'error' });
           return;
         }
 
@@ -99,10 +119,13 @@ export default function StudentRegistrationPage() {
         setForcedCourseIds(normalizedForced);
         setSelectedOrder(normalizedForced.length > 0 ? normalizedForced : preselected);
       }
+      setRegistrationNotice('');
       // setShowBasic(false); // Keep basic details and Proceed button visible
       setShowCourses(true);
     } catch (err) {
-      setNotification({ show: true, message: err?.response?.data?.error || err?.message || 'Failed to verify', type: 'error' });
+      const formattedMessage = formatRegistrationMessage(err?.response?.data?.error || err?.message || 'Failed to verify');
+      setRegistrationNotice(formattedMessage);
+      setNotification({ show: true, message: formattedMessage, type: 'error' });
     }
   }
 
@@ -139,9 +162,10 @@ export default function StudentRegistrationPage() {
   async function handleConfirmSubmission() {
     if (isSavingPreferences) return;
 
+    const trimmedUsn = basic.usn.trim();
     const preferences = selectedPreferences.map((row) => ({
       instance_course_id: row.instance_course_id,
-      usn: basic.usn,
+      usn: trimmedUsn,
       preferred: row.preferred
     }));
 
@@ -149,7 +173,7 @@ export default function StudentRegistrationPage() {
       setIsSavingPreferences(true);
       await submitPreferences({ preferences }, token);
 
-      const refreshed = await checkStudentDetails({ uid1: basic.uid, name1: basic.name, usn: basic.usn }, token);
+      const refreshed = await checkStudentDetails({ uid1: basic.uid, name1: basic.name, usn: trimmedUsn }, token);
       const refreshedData = refreshed?.data || {};
 
       if (refreshedData.registered) {
@@ -182,6 +206,12 @@ export default function StudentRegistrationPage() {
 
         <h1 className="text-2xl font-semibold mb-2 text-center">Elective Registration</h1>
         <p className="text-sm text-gray-600 mb-6">Follow the steps to save your preferences.</p>
+
+        {registrationNotice && (
+          <div className="mb-6 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {registrationNotice}
+          </div>
+        )}
 
         <div className="mb-6">
           <label className="inline-flex items-center">

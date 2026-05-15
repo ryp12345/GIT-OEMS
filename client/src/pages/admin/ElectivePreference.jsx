@@ -29,6 +29,47 @@ function toCsvCell(value) {
 	return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
 
+function getPreferenceCellFromRow(row, pref) {
+  const count = getFirstDefined(row?.[`p${pref}_count`], row?.[`p${pref}_cnt`]);
+  const min = getFirstDefined(row?.[`p${pref}_min_grade`], row?.[`p${pref}_min`]);
+  const median = getFirstDefined(
+    row?.[`p${pref}_median_grade`],
+    row?.[`p${pref}_medium_grade`],
+    row?.[`p${pref}_median`],
+    row?.[`p${pref}_medium`]
+  );
+  const max = getFirstDefined(row?.[`p${pref}_max_grade`], row?.[`p${pref}_max`]);
+
+  // Backward compatibility if older API sends row.preferences
+  if (
+    count == null &&
+    min == null &&
+    median == null &&
+    max == null &&
+    Array.isArray(row?.preferences)
+  ) {
+    const legacy = row.preferences.find((p) => Number(p.prefIndex) === pref) || {};
+    return {
+      count: getFirstDefined(legacy.count, legacy.total),
+      min_grade: getFirstDefined(legacy.min_grade, legacy.min),
+      median_grade: getFirstDefined(
+        legacy.median_grade,
+        legacy.medium_grade,
+        legacy.median,
+        legacy.medium
+      ),
+      max_grade: getFirstDefined(legacy.max_grade, legacy.max)
+    };
+  }
+
+  return {
+    count,
+    min_grade: min,
+    median_grade: median,
+    max_grade: max
+  };
+}
+
 function StatisticsChartModal({ row, onClose }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
@@ -372,6 +413,15 @@ export default function ElectivePreferencePage() {
   const hasSelectedInstance = hasActiveInstance;
   // Dynamic preferences for table columns
   const allPreferences = useMemo(() => getAllPreferences(rows), [rows]);
+  const preferenceCountTotals = useMemo(() => {
+    return allPreferences.reduce((acc, pref) => {
+      acc[pref] = rows.reduce((sum, row) => {
+        const count = Number(getPreferenceCellFromRow(row, pref).count || 0);
+        return sum + count;
+      }, 0);
+      return acc;
+    }, {});
+  }, [allPreferences, rows]);
 
   return (
     <div className="flex h-screen bg-slate-100">
@@ -466,54 +516,12 @@ export default function ElectivePreferencePage() {
                             ? 'bg-emerald-100'
                             : 'bg-gray-100';
 
-                        // Build per-preference stats from current API shape (p1_*, p2_*)
-                        const getPreferenceCell = (pref) => {
-                          const count = getFirstDefined(row[`p${pref}_count`], row[`p${pref}_cnt`]);
-                          const min = getFirstDefined(row[`p${pref}_min_grade`], row[`p${pref}_min`]);
-                          const median = getFirstDefined(
-                            row[`p${pref}_median_grade`],
-                            row[`p${pref}_medium_grade`],
-                            row[`p${pref}_median`],
-                            row[`p${pref}_medium`]
-                          );
-                          const max = getFirstDefined(row[`p${pref}_max_grade`], row[`p${pref}_max`]);
-
-                          // Backward compatibility if older API sends row.preferences
-                          if (
-                            count == null &&
-                            min == null &&
-                            median == null &&
-                            max == null &&
-                            Array.isArray(row.preferences)
-                          ) {
-                            const legacy = row.preferences.find((p) => Number(p.prefIndex) === pref) || {};
-                            return {
-                              count: getFirstDefined(legacy.count, legacy.total),
-                              min_grade: getFirstDefined(legacy.min_grade, legacy.min),
-                              median_grade: getFirstDefined(
-                                legacy.median_grade,
-                                legacy.medium_grade,
-                                legacy.median,
-                                legacy.medium
-                              ),
-                              max_grade: getFirstDefined(legacy.max_grade, legacy.max)
-                            };
-                          }
-
-                          return {
-                            count,
-                            min_grade: min,
-                            median_grade: median,
-                            max_grade: max
-                          };
-                        };
-
                         return (
                           <tr key={`${row.coursecode}-${index}`} className={`${statusRowClass} border-b border-gray-200`}>
                             <td className="border px-3 py-2 text-sm">{index + 1}</td>
                             <td className="border px-3 py-2 text-sm">{row.coursename} ({row.coursecode})</td>
                             {allPreferences.map((pref) => {
-                              const p = getPreferenceCell(pref);
+                              const p = getPreferenceCellFromRow(row, pref);
                               return [
                                 <td key={`p${pref}_count`} className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{p.count ?? ''}</td>,
                                 <td key={`p${pref}_min`} className="border px-3 py-2 text-center text-sm">{formatGrade(p.min_grade)}</td>,
@@ -548,7 +556,18 @@ export default function ElectivePreferencePage() {
 
                     {hasSelectedInstance && !isLoading ? (
                       <tr className="bg-gray-200">
-                        <td colSpan={allPreferences.length * 4 + 5} className="border px-3 py-2 text-sm font-bold">Grand Total Allocations</td>
+                        <td className="border px-3 py-2 text-sm font-bold" colSpan={2}>Column Totals</td>
+                        {allPreferences.map((pref) => [
+                          <td key={`total_p${pref}_count`} className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">
+                            {preferenceCountTotals[pref] ?? 0}
+                          </td>,
+                          <td key={`total_p${pref}_min`} className="border px-3 py-2" />, 
+                          <td key={`total_p${pref}_median`} className="border px-3 py-2" />,
+                          <td key={`total_p${pref}_max`} className="border px-3 py-2" />
+                        ])}
+                        <td className="border px-3 py-2" />
+                        <td className="border px-3 py-2" />
+                        <td className="border px-3 py-2" />
                         <td className="border border-l-2 border-r-2 border-blue-600 px-3 py-2 text-center text-sm font-bold">{grandTotalAllocations}</td>
                         <td className="border px-3 py-2" />
                         <td className="border px-3 py-2" />

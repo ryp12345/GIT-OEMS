@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
 import Notification from '../../components/common/Notification';
@@ -41,6 +42,15 @@ function normalizeFormState(formState) {
 export default function StudentsPage() {
 	const token = localStorage.getItem('token');
 	const { activeInstance, hasActiveInstance } = useAdminInstance();
+	const location = useLocation();
+
+	function getQueryParams() {
+		const params = new URLSearchParams(location.search);
+		return {
+			pref_status: params.get('pref_status'),
+			instance_id: params.get('instance_id')
+		};
+	}
 	const [students, setStudents] = useState([]);
 	const [departments, setDepartments] = useState([]);
 	const [search, setSearch] = useState('');
@@ -68,8 +78,11 @@ export default function StudentsPage() {
 		try {
 			setIsLoading(true);
 			setError('');
+			const { pref_status, instance_id } = getQueryParams();
+
+			const instanceParam = instance_id || activeInstance?.id || null;
 			const [studentsResponse, metaResponse] = await Promise.all([
-				getStudents(token, activeInstance?.id || null),
+				getStudents(token, instanceParam, pref_status || null),
 				getStudentMeta(token)
 			]);
 

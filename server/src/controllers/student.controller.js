@@ -3,7 +3,8 @@ const studentService = require('../services/student.service');
 exports.list = async (req, res, next) => {
 	try {
 		const instanceId = req.query.instance_id ? Number(req.query.instance_id) : null;
-		const students = await studentService.getStudents(instanceId);
+		const prefStatus = req.query.pref_status ? String(req.query.pref_status).toLowerCase() : null;
+		const students = await studentService.getStudents(instanceId, prefStatus);
 		res.json(students);
 	} catch (error) {
 		next(error);
