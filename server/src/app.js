@@ -13,10 +13,22 @@ const errorMiddleware = require('./middlewares/error.middleware');
 app.set('trust proxy', 1);
 app.use(express.json());
 const isProduction = process.env.NODE_ENV === 'production';
-const corsEnv = process.env.CORS_ORIGIN || process.env.CLIENT_URL || '';
+const corsEnv = [
+	process.env.CORS_ORIGIN,
+	process.env.CLIENT_URL,
+	process.env.FRONTEND_URL
+]
+	.filter(Boolean)
+	.join(',');
+
+function isTemplatePlaceholder(value) {
+	return /^\$\{[^}]+\}$/.test((value || '').trim());
+}
+
 const allowedOrigins = corsEnv
 	.split(',')
 	.map((origin) => normalizeOrigin(origin))
+	.filter((origin) => !isTemplatePlaceholder(origin))
 	.filter(Boolean);
 
 function normalizeOrigin(origin) {
