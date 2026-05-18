@@ -245,7 +245,17 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 
 	const [detailsResult, chartResult] = await Promise.all([
 		pool.query(
-		`SELECT
+		`WITH eligible_students AS (
+			SELECT DISTINCT LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g')) AS usn_key
+			FROM public.students s
+			WHERE EXISTS (
+				SELECT 1
+				FROM public.student_academic_records sar
+				WHERE sar.instance_id = $1
+				  AND LOWER(REGEXP_REPLACE(sar.usn, '\\s+', '', 'g')) = LOWER(REGEXP_REPLACE(s.usn, '\\s+', '', 'g'))
+			)
+		)
+		SELECT
 			ic.id AS instance_course_id,
 			COALESCE(NULLIF(ic.allocation_status, ''), 'Pending') AS allocation_status,
 			i.id AS instanceid,
@@ -253,6 +263,7 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 			ic.coursecode,
 			c.coursename,
 			p.preferred,
+			LOWER(REGEXP_REPLACE(COALESCE(s.usn, p.usn), '\\s+', '', 'g')) AS usn_key,
 			ic.division,
 			ic.min_intake,
 			ic.max_intake,
@@ -263,6 +274,8 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 		JOIN public.instances i ON i.id = ic.instance_id
 		JOIN public.courses c ON UPPER(ic.coursecode) = UPPER(c.coursecode)
 		LEFT JOIN public.students s ON LOWER(p.usn) = LOWER(s.usn)
+		JOIN eligible_students es
+			ON es.usn_key = LOWER(REGEXP_REPLACE(COALESCE(s.usn, p.usn), '\\s+', '', 'g'))
 		${sarJoinType} public.student_academic_records sar
 			ON LOWER(COALESCE(s.usn, p.usn)) = LOWER(sar.usn)
 			AND sar.instance_id = i.id
@@ -342,6 +355,7 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 	 }
 
 	 const statsByCourse = new Map();
+	 const seenStudentsByPreference = new Map();
 	 for (const row of detailsResult.rows) {
 		 const key = Number(row.instance_course_id);
 		 if (!statsByCourse.has(key)) {
@@ -364,15 +378,31 @@ async function getPreferenceStatisticsDetailsByInstance(instanceId, options = {}
 			 continue;
 		 }
 
+		 if (!seenStudentsByPreference.has(pref)) {
+			 seenStudentsByPreference.set(pref, new Set());
+		 }
+
 		 if (!course.preferences.has(pref)) {
-			 course.preferences.set(pref, { count: 0, grades: [] });
+			 course.preferences.set(pref, { count: 0, grades: [], usnKeys: new Set() });
 		 }
 
 		const prefStats = course.preferences.get(pref);
-		prefStats.count += 1;
+		const usnKey = typeof row.usn_key === 'string' ? row.usn_key.trim() : '';
+		const hasUsnKey = usnKey.length > 0;
+		const seenForPref = seenStudentsByPreference.get(pref);
+		const isCrossCourseDuplicate = hasUsnKey ? seenForPref.has(usnKey) : false;
+		const isNewStudent = hasUsnKey ? !prefStats.usnKeys.has(usnKey) && !isCrossCourseDuplicate : true;
+
+		if (isNewStudent) {
+			prefStats.count += 1;
+			if (hasUsnKey) {
+				prefStats.usnKeys.add(usnKey);
+				seenForPref.add(usnKey);
+			}
+		}
 
 		 const gradeNum = row.grade == null || row.grade === '' ? null : Number(row.grade);
-		 if (gradeNum != null && Number.isFinite(gradeNum)) {
+		 if (isNewStudent && gradeNum != null && Number.isFinite(gradeNum)) {
 			 prefStats.grades.push(gradeNum);
 		 }
 	 }
