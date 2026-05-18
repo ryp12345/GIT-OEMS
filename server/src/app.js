@@ -10,6 +10,7 @@ const preferencesRoutes = require('./routes/preferences.routes');
 const allocationRoutes = require('./routes/allocation.routes');
 const errorMiddleware = require('./middlewares/error.middleware');
 
+app.set('trust proxy', 1);
 app.use(express.json());
 const isProduction = process.env.NODE_ENV === 'production';
 const corsEnv = process.env.CORS_ORIGIN || process.env.CLIENT_URL || '';
@@ -20,6 +21,69 @@ const allowedOrigins = corsEnv
 
 function normalizeOrigin(origin) {
 	return (origin || '').trim().replace(/\/+$/, '');
+}
+
+function parseOrigin(value) {
+	const normalized = normalizeOrigin(value);
+	if (!normalized) return null;
+
+	try {
+		const parsed = new URL(normalized);
+		return {
+			raw: normalized,
+			protocol: parsed.protocol,
+			hostname: parsed.hostname,
+			port: parsed.port,
+			isWildcard: false
+		};
+	} catch (_error) {
+		const wildcardMatch = normalized.match(/^\*\.([a-z0-9.-]+)$/i);
+		if (wildcardMatch) {
+			return {
+				raw: normalized,
+				protocol: null,
+				hostname: wildcardMatch[1].toLowerCase(),
+				port: '',
+				isWildcard: true
+			};
+		}
+
+		const hostPortMatch = normalized.match(/^([a-z0-9.-]+)(?::(\d+))?$/i);
+		if (!hostPortMatch) return null;
+
+		return {
+			raw: normalized,
+			protocol: null,
+			hostname: hostPortMatch[1].toLowerCase(),
+			port: hostPortMatch[2] || '',
+			isWildcard: false
+		};
+	}
+}
+
+function originMatches(requestOrigin, allowedOrigin) {
+	if (requestOrigin === allowedOrigin.raw) return true;
+
+	const parsedRequest = parseOrigin(requestOrigin);
+	if (!parsedRequest) return false;
+
+	if (allowedOrigin.isWildcard) {
+		return parsedRequest.hostname === allowedOrigin.hostname || parsedRequest.hostname.endsWith(`.${allowedOrigin.hostname}`);
+	}
+
+	if (allowedOrigin.protocol && parsedRequest.protocol !== allowedOrigin.protocol) {
+		return false;
+	}
+
+	if (parsedRequest.hostname !== allowedOrigin.hostname) {
+		return false;
+	}
+
+	if (allowedOrigin.port && parsedRequest.port !== allowedOrigin.port) {
+		return false;
+	}
+
+	return true;
 }
 
 function getRequestOrigin(req) {
@@ -67,25 +131,19 @@ app.use(cors(function(req, callback) {
 		return;
 	}
 
-	// Check if origin matches allowed origins (with or without port)
-	const isAllowed = allowedOrigins.some(allowed => {
-		if (requestOrigin === allowed) return true;
-		// Also check if the origin domain matches (ignoring port)
-		try {
-			const reqUrl = new URL(requestOrigin);
-			const allowedUrl = new URL(allowed);
-			if (reqUrl.protocol === allowedUrl.protocol && reqUrl.hostname === allowedUrl.hostname) {
-				return true;
-			}
-		} catch (e) {
-			// Ignore URL parsing errors
-		}
-		return false;
-	});
+	const parsedAllowedOrigins = allowedOrigins
+		.map((origin) => parseOrigin(origin))
+		.filter(Boolean);
+
+	const isAllowed = parsedAllowedOrigins.some((allowedOrigin) => originMatches(requestOrigin, allowedOrigin));
 
 	if (isAllowed || requestOrigin === sameSiteOrigin) {
 		callback(null, { credentials: true, origin: true });
 		return;
+	}
+
+	if (isProduction) {
+		console.warn('[CORS] Blocked origin:', requestOrigin, '| Allowed:', allowedOrigins);
 	}
 
 	callback(new Error('Not allowed by CORS: ' + requestOrigin));
