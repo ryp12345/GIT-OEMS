@@ -105,6 +105,25 @@ function getRequestOrigin(req) {
 	return normalizeOrigin(`${protocol}://${host}`);
 }
 
+function effectivePort(parsed) {
+	if (parsed.port) return parsed.port;
+	if (parsed.protocol === 'https:') return '443';
+	if (parsed.protocol === 'http:') return '80';
+	return '';
+}
+
+function isSameHostOrigin(requestOrigin, sameSiteOrigin) {
+	if (!requestOrigin || !sameSiteOrigin) return false;
+
+	try {
+		const reqUrl = new URL(requestOrigin);
+		const sameUrl = new URL(sameSiteOrigin);
+		return reqUrl.hostname === sameUrl.hostname && effectivePort(reqUrl) === effectivePort(sameUrl);
+	} catch (_error) {
+		return requestOrigin === sameSiteOrigin;
+	}
+}
+
 function isPrivateDevOrigin(origin) {
 	try {
 		const { hostname } = new URL(origin);
@@ -133,7 +152,7 @@ app.use(cors(function(req, callback) {
 		return;
 	}
 
-	if (!isProduction && allowedOrigins.length === 0) {
+	if (allowedOrigins.length === 0) {
 		callback(null, { credentials: true, origin: true });
 		return;
 	}
@@ -149,16 +168,18 @@ app.use(cors(function(req, callback) {
 
 	const isAllowed = parsedAllowedOrigins.some((allowedOrigin) => originMatches(requestOrigin, allowedOrigin));
 
-	if (isAllowed || requestOrigin === sameSiteOrigin) {
+	if (isAllowed || isSameHostOrigin(requestOrigin, sameSiteOrigin)) {
 		callback(null, { credentials: true, origin: true });
 		return;
 	}
 
 	if (isProduction) {
-		console.warn('[CORS] Blocked origin:', requestOrigin, '| Allowed:', allowedOrigins);
+		console.warn('[CORS] Blocked origin:', requestOrigin, '| Same-site:', sameSiteOrigin, '| Allowed:', allowedOrigins);
 	}
 
-	callback(new Error('Not allowed by CORS: ' + requestOrigin));
+	const corsError = new Error('Not allowed by CORS: ' + requestOrigin);
+	corsError.statusCode = 403;
+	callback(corsError);
 }));
 
 app.use('/api/auth', authRoutes);
