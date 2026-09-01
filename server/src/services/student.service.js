@@ -312,58 +312,62 @@ async function importStudentsFromFile(fileBuffer, instanceId) {
 	]);
 
 	const importedStudents = [];
+	const skippedRows = [];
 
 	for (let index = 0; index < rows.length; index += 1) {
-		const row = rows[index];
-		const rowNumber = index + 2;
-		const name = getRowValue(row, ['name', 'student_name']);
-		const email = getRowValue(row, ['email', 'student_email']);
-		const uid = getRowValue(row, ['uid']);
-		const usn = getRowValue(row, ['usn']);
-		const departmentValue = getRowValue(row, ['department_id', 'deptid', 'department', 'department_name']);
-		const semester = getRowValue(row, ['semester', 'current_sem', 'current_semester']);
-		const cgpa = getRowValue(row, ['cgpa', 'grade']);
+		try {
+			const row = rows[index];
+			const rowNumber = index + 2;
+			const name = getRowValue(row, ['name', 'student_name']);
+			const email = getRowValue(row, ['email', 'student_email']);
+			const uid = getRowValue(row, ['uid']);
+			const usn = getRowValue(row, ['usn']);
+			const departmentValue = getRowValue(row, ['department_id', 'deptid', 'department', 'department_name']);
+			const semester = getRowValue(row, ['semester', 'current_sem', 'current_semester']);
+			const cgpa = getRowValue(row, ['cgpa', 'grade']);
 
-		const hasAnyStudentField = [
-			name,
-			email,
-			uid,
-			usn,
-			semester,
-			cgpa
-		].some((value) => Boolean(String(value || '').trim()));
+			const hasAnyStudentField = [
+				name,
+				email,
+				uid,
+				usn,
+				semester,
+				cgpa
+			].some((value) => Boolean(String(value || '').trim()));
 
-		if (!hasAnyStudentField) {
-			continue;
+			if (!hasAnyStudentField) {
+				continue;
+			}
+
+			if (!name || !email || !uid || !usn || !departmentValue || !semester || !cgpa) {
+				throw new Error(`Row ${rowNumber}: name, email, uid, usn, department, semester, and cgpa are required`);
+			}
+
+			const department = departmentLookup.get(departmentValue.toLowerCase());
+			if (!department) {
+				throw new Error(`Row ${rowNumber}: department "${departmentValue}" was not found`);
+			}
+
+			const payload = normalizePayload({
+				name,
+				email,
+				uid,
+				usn,
+				department_id: department.id,
+				semester,
+				cgpa
+			});
+
+			await ensureDepartmentExists(payload.department_id);
+			const student = await resolveStudentForImport(payload, rowNumber);
+			await upsertAcademicRecord(student, payload.semester, payload.cgpa, normalizedInstanceId);
+			importedStudents.push(await studentModel.getStudentById(student.id));
+		} catch (error) {
+			skippedRows.push({
+				rowNumber: index + 2,
+				error: error?.message || 'Failed to import row'
+			});
 		}
-
-		if (!name || !email || !uid || !usn || !departmentValue || !semester || !cgpa) {
-			const error = new Error(`Row ${rowNumber}: name, email, uid, usn, department, semester, and cgpa are required`);
-			error.statusCode = 400;
-			throw error;
-		}
-
-		const department = departmentLookup.get(departmentValue.toLowerCase());
-		if (!department) {
-			const error = new Error(`Row ${rowNumber}: department "${departmentValue}" was not found`);
-			error.statusCode = 400;
-			throw error;
-		}
-
-		const payload = normalizePayload({
-			name,
-			email,
-			uid,
-			usn,
-			department_id: department.id,
-			semester,
-			cgpa
-		});
-
-		await ensureDepartmentExists(payload.department_id);
-		const student = await resolveStudentForImport(payload, rowNumber);
-		await upsertAcademicRecord(student, payload.semester, payload.cgpa, normalizedInstanceId);
-		importedStudents.push(await studentModel.getStudentById(student.id));
 	}
 
 	if (importedStudents.length === 0) {
@@ -374,7 +378,8 @@ async function importStudentsFromFile(fileBuffer, instanceId) {
 
 	return {
 		importedCount: importedStudents.length,
-		students: importedStudents
+		students: importedStudents,
+		skippedRows
 	};
 }
 
