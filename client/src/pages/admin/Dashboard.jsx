@@ -102,6 +102,10 @@ useEffect(() => {
 	const [formEnabledStatus, setFormEnabledStatus] = useState('');
 	const [isUpdating, setIsUpdating] = useState(false);
 
+	const [showNoPrefModal, setShowNoPrefModal] = useState(false);
+	const [noPrefStudents, setNoPrefStudents] = useState([]);
+	const [noPrefLoading, setNoPrefLoading] = useState(false);
+
 	useEffect(() => {
 		loadDashboardData();
 	}, [activeInstanceId]);
@@ -204,6 +208,29 @@ useEffect(() => {
 
 	function showNotification(message, type = 'success') {
 		setNotification({ show: true, message, type });
+	}
+
+	async function openNoPrefModal() {
+		if (!activeInstanceId) {
+			showNotification('Select an active instance first', 'error');
+			return;
+		}
+		setShowNoPrefModal(true);
+		setNoPrefStudents([]);
+		setNoPrefLoading(true);
+		try {
+			const res = await getStudents(token, activeInstanceId, 'pending');
+			const data = Array.isArray(res?.data?.data)
+				? res.data.data
+				: Array.isArray(res?.data)
+					? res.data
+					: [];
+			setNoPrefStudents(data);
+		} catch {
+			setNoPrefStudents([]);
+		} finally {
+			setNoPrefLoading(false);
+		}
 	}
 
 	function openPreferenceFormModal() {
@@ -505,6 +532,14 @@ useEffect(() => {
 											<p className="font-semibold">Preference Form</p>
 											<p className="text-xs opacity-90">Enable or disable form access</p>
 										</button>
+										<button
+											type="button"
+											onClick={openNoPrefModal}
+											className="bg-white/15 hover:bg-white/25 rounded-lg p-4 text-left transition"
+										>
+											<p className="font-semibold">No Preference Submitted</p>
+											<p className="text-xs opacity-90">Students yet to submit preferences</p>
+										</button>
 									</div>
 								</div>
 								<div>
@@ -592,7 +627,74 @@ useEffect(() => {
 									</div>
 								)}
 
-								<div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+								{showNoPrefModal && (
+							<div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
+								<div className="flex items-end justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+									<div className="fixed inset-0 transition-opacity bg-slate-500 bg-opacity-75" onClick={() => setShowNoPrefModal(false)} />
+									<div className="inline-block overflow-hidden text-left align-bottom transition-all transform bg-white rounded-lg shadow-xl sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full">
+										<div className="px-6 py-4 bg-sky-700">
+											<div className="flex items-center justify-between">
+												<h3 className="text-lg font-medium leading-6 text-white">
+													Students Without Preferences
+													{activeInstance && (
+														<span className="ml-2 text-sm font-normal opacity-90">
+															— {activeInstance.instancename} ({activeInstance.academic_year}, Sem {activeInstance.semester})
+														</span>
+													)}
+												</h3>
+												<button className="text-white hover:text-slate-200" onClick={() => setShowNoPrefModal(false)}>
+													<svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+														<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+													</svg>
+												</button>
+											</div>
+										</div>
+										<div className="px-6 py-5 max-h-[60vh] overflow-y-auto">
+											{noPrefLoading ? (
+												<div className="py-10 text-center text-slate-500">Loading...</div>
+											) : noPrefStudents.length === 0 ? (
+												<div className="py-10 text-center text-slate-500">All students have submitted their preferences.</div>
+											) : (
+												<>
+													<p className="text-sm text-slate-600 mb-3">{noPrefStudents.length} student(s) have not submitted preferences.</p>
+													<table className="min-w-full border-collapse">
+														<thead>
+															<tr className="bg-blue-600 text-white">
+																<th className="border px-4 py-2 text-left text-xs uppercase">Sl.No</th>
+																<th className="border px-4 py-2 text-left text-xs uppercase">Name</th>
+																<th className="border px-4 py-2 text-left text-xs uppercase">USN</th>
+																<th className="border px-4 py-2 text-left text-xs uppercase">Department</th>
+															</tr>
+														</thead>
+														<tbody className="divide-y divide-slate-200">
+															{noPrefStudents.map((student, idx) => (
+																<tr key={student.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+																	<td className="border px-4 py-2 text-sm text-slate-700">{idx + 1}</td>
+																	<td className="border px-4 py-2 text-sm text-slate-900 font-medium">{student.name}</td>
+																	<td className="border px-4 py-2 text-sm text-slate-700">{student.usn}</td>
+																	<td className="border px-4 py-2 text-sm text-slate-700">{student.department_name || student.department_shortname || '-'}</td>
+																</tr>
+															))}
+														</tbody>
+													</table>
+												</>
+											)}
+										</div>
+										<div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+											<button
+												type="button"
+												onClick={() => setShowNoPrefModal(false)}
+												className="inline-flex justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-500"
+											>
+												Close
+											</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						)}
+
+						<div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 										{/* Elective Preferences Table (read-only) */}
 										<div className="bg-white rounded-xl shadow-lg p-6 min-h-[500px]">
 											<h2 className="text-xl font-semibold text-slate-900 mb-6">Elective Preferences </h2>

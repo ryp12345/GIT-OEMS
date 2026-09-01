@@ -62,8 +62,8 @@ function buildSummarySheet(rows, grandTotalAllocations) {
     headerRow2.push(String(pref), 'Min', 'Median', 'Max');
   });
 
-  headerRow1.push('Div', 'Min', 'Max', 'Allocations', 'Status', 'Stats');
-  headerRow2.push('', '', '', '', '', '');
+  headerRow1.push('Div', 'Min', 'Max', 'Allocations');
+  headerRow2.push('', '', '', '');
 
   const preferenceCountTotals = allPreferences.reduce((acc, pref) => {
     acc[pref] = (rows || []).reduce((sum, row) => {
@@ -89,9 +89,7 @@ function buildSummarySheet(rows, grandTotalAllocations) {
       row.division ?? '',
       row.min_intake ?? '',
       row.max_intake ?? '',
-      row.total_allocations ?? '',
-      row.allocation_status ?? '',
-      Number(row.total_allocations || 0) > 0 ? 'Available' : ''
+      row.total_allocations ?? ''
     );
 
     return rowCells;
@@ -101,7 +99,7 @@ function buildSummarySheet(rows, grandTotalAllocations) {
   allPreferences.forEach((pref) => {
     totalsRow.push(preferenceCountTotals[pref] ?? 0, '', '', '');
   });
-  totalsRow.push('', '', '', grandTotalAllocations ?? 0, '', '');
+  totalsRow.push('', '', '', grandTotalAllocations ?? 0);
 
   return [headerRow1, headerRow2, ...bodyRows, totalsRow];
 }

@@ -3,6 +3,8 @@ const XLSX = require('xlsx');
 const pool = require('../config/db');
 
 const VALID_SEMESTERS = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
+const CGPA_MIN = 0;
+const CGPA_MAX = 100;
 
 function normalizeDepartmentId(value) {
 	const numericValue = Number(value);
@@ -69,8 +71,8 @@ function normalizePayload(payload = {}) {
 		throw error;
 	}
 
-	if (!Number.isFinite(cgpaValue) || cgpaValue < 0 || cgpaValue > 10) {
-		const error = new Error('CGPA must be between 0 and 10');
+	if (!Number.isFinite(cgpaValue) || cgpaValue < CGPA_MIN || cgpaValue > CGPA_MAX) {
+		const error = new Error(`CGPA must be between ${CGPA_MIN} and ${CGPA_MAX}`);
 		error.statusCode = 400;
 		throw error;
 	}
@@ -155,8 +157,8 @@ async function generateStudentTemplateBuffer() {
 	]], { origin: 'A1' });
 
 	XLSX.utils.sheet_add_aoa(worksheet, [
-		['Asha Kulkarni', 'asha.kulkarni@git.edu', '01FE23BCS101', '2GI23CS001', '1', '3', '8.42'],
-		['Rohan Patil', 'rohan.patil@git.edu', '01FE23BEC045', '2GI23EC014', '2', '5', '7.96']
+		['Asha Kulkarni', 'asha.kulkarni@git.edu', '01FE23BCS101', '2GI23CS001', '1', '3', '84.20'],
+		['Rohan Patil', 'rohan.patil@git.edu', '01FE23BEC045', '2GI23EC014', '2', '5', '79.60']
 	], { origin: 'A2' });
 
 	XLSX.utils.sheet_add_aoa(worksheet, [['Department ID', 'Department Name']], { origin: 'J1' });

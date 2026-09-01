@@ -16,6 +16,8 @@ import {
 
 const PAGE_SIZE = 10;
 const semesterOptions = ['1', '2', '3', '4', '5', '6', '7', '8'];
+const CGPA_MIN = 0;
+const CGPA_MAX = 100;
 
 const initialFormState = {
 	name: '',
@@ -264,8 +266,8 @@ export default function StudentsPage() {
 		}
 
 		const cgpaValue = Number(formState.cgpa);
-		if (!Number.isFinite(cgpaValue) || cgpaValue < 0 || cgpaValue > 10) {
-			setError('CGPA must be between 0 and 10');
+		if (!Number.isFinite(cgpaValue) || cgpaValue < CGPA_MIN || cgpaValue > CGPA_MAX) {
+			setError(`CGPA must be between ${CGPA_MIN} and ${CGPA_MAX}`);
 			return;
 		}
 
@@ -686,11 +688,12 @@ export default function StudentsPage() {
 
 													<div className="md:col-span-1">
 														<label className="mb-2 block text-sm font-medium text-gray-700">CGPA *</label>
+														<p className="mb-2 text-xs text-gray-500">Enter a value from 0 to 100.</p>
 														<input
 															type="number"
 															name="cgpa"
 															min="0"
-															max="10"
+															max="100"
 															step="0.01"
 															value={formState.cgpa}
 															onChange={handleFieldChange}
