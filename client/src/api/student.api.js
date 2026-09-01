@@ -51,6 +51,12 @@ export function updateStudent(id, payload, token) {
 	});
 }
 
+export function updateStudentEmail(payload, token) {
+	return api.patch('/students/email', payload, {
+		headers: tokenHeaders(token)
+	});
+}
+
 export function deleteStudent(id, token) {
 	return api.delete(`/students/${id}`, {
 		headers: tokenHeaders(token)

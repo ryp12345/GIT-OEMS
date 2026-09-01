@@ -12,6 +12,32 @@ async function getPreferencesByUsn(usn, instanceId) {
 	return result.rows;
 }
 
+async function getPreferenceSubmissionDetails(preferences) {
+	const instanceCourseIds = preferences.map((pref) => Number(pref.instance_course_id));
+	if (instanceCourseIds.length === 0) {
+		return [];
+	}
+
+	const result = await pool.query(
+		`SELECT
+			ic.id AS instance_course_id,
+			ic.coursecode,
+			c.coursename,
+			eg.group_name,
+			p.preferred
+		 FROM public.instance_courses ic
+		 LEFT JOIN public.courses c ON UPPER(TRIM(c.coursecode)) = UPPER(TRIM(ic.coursecode))
+		 LEFT JOIN public.elective_group eg ON eg.id = c.elective_group_id
+		 JOIN jsonb_to_recordset($1::jsonb) AS p(instance_course_id integer, preferred integer)
+		   ON p.instance_course_id = ic.id
+		 WHERE ic.id = ANY($2::int[])
+		 ORDER BY p.preferred ASC, ic.id ASC`,
+		[JSON.stringify(instanceCourseIds.map((id, index) => ({ instance_course_id: id, preferred: Number(preferences[index]?.preferred || index + 1) }))), instanceCourseIds]
+	);
+
+	return result.rows;
+}
+
 async function insertPreferences(preferences) {
 	const client = await pool.connect();
 	try {
@@ -51,4 +77,4 @@ async function insertPreferences(preferences) {
 	}
 }
 
-module.exports = { getPreferencesByUsn, insertPreferences };
+module.exports = { getPreferencesByUsn, getPreferenceSubmissionDetails, insertPreferences };

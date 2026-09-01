@@ -422,6 +422,32 @@ async function editStudent(id, payload) {
 	return studentModel.updateStudent(id, student);
 }
 
+async function updateStudentEmail(usn, email) {
+	const normalizedUsn = String(usn || '').trim().toUpperCase();
+	const normalizedEmail = String(email || '').trim().toLowerCase();
+
+	if (!normalizedUsn) {
+		const error = new Error('USN is required');
+		error.statusCode = 400;
+		throw error;
+	}
+
+	if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+		const error = new Error('A valid email is required');
+		error.statusCode = 400;
+		throw error;
+	}
+
+	const updated = await studentModel.updateStudentEmailByUsn(normalizedUsn, normalizedEmail);
+	if (!updated) {
+		const error = new Error('Student not found');
+		error.statusCode = 404;
+		throw error;
+	}
+
+	return studentModel.getStudentByUsn(normalizedUsn);
+}
+
 async function removeStudent(id) {
 	const existing = await studentModel.getStudentById(id);
 	if (!existing) {
@@ -803,7 +829,8 @@ async function checkName(payload = {}) {
 		student: {
 			id: student.id,
 			department_id: student.department_id,
-			usn: student.usn
+			usn: student.usn,
+			email: student.email || ''
 		},
 		allocatedCourseCodes,
 		previousAllocatedCourseCodes,
@@ -819,6 +846,7 @@ module.exports = {
 	importStudentsFromFile,
 	addStudent,
 	editStudent,
+	updateStudentEmail,
 	removeStudent
   ,
   checkName

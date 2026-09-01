@@ -99,6 +99,37 @@ async function getStudentById(id) {
 	return result.rows[0] || null;
 }
 
+async function getStudentByUsn(usn) {
+	const result = await pool.query(
+		`SELECT s.id,
+				 s.name,
+				 s.email,
+				 s.uid,
+				 s.usn,
+				 s.department_id,
+				 d.name AS department_name,
+				 d.shortname AS department_shortname,
+				 ar.semester,
+				 ar.grade AS cgpa,
+				 s.created_at,
+				 s.updated_at
+			 FROM public.students s
+			 LEFT JOIN public.departments d ON d.deptid = s.department_id
+			 LEFT JOIN LATERAL (
+			 	SELECT semester, grade
+			 	FROM public.student_academic_records sar
+			 	WHERE UPPER(sar.usn) = UPPER(s.usn)
+			 	ORDER BY sar.updated_at DESC NULLS LAST, sar.id DESC
+			 	LIMIT 1
+			 ) ar ON TRUE
+			 WHERE UPPER(s.usn) = UPPER($1)
+			 LIMIT 1`,
+		[usn]
+	);
+
+	return result.rows[0] || null;
+}
+
 async function createStudent(student) {
 	const result = await pool.query(
 		`INSERT INTO public.students (
@@ -217,6 +248,19 @@ async function updateStudent(id, student) {
 	return getStudentById(id);
 }
 
+async function updateStudentEmailByUsn(usn, email) {
+	const result = await pool.query(
+		`UPDATE public.students
+		 SET email = $2,
+			 updated_at = NOW()
+		 WHERE UPPER(usn) = UPPER($1)
+		 RETURNING id`,
+		[usn, email]
+	);
+
+	return result.rowCount > 0;
+}
+
 async function deleteStudent(id) {
 	const result = await pool.query('DELETE FROM public.students WHERE id = $1 RETURNING id', [id]);
 	return result.rowCount > 0;
@@ -273,8 +317,10 @@ async function departmentExists(id) {
 module.exports = {
 	listStudents,
 	getStudentById,
+	getStudentByUsn,
 	createStudent,
 	updateStudent,
+	updateStudentEmailByUsn,
 	deleteStudent,
 	getLatestAcademicRecordByUsn,
 	getAcademicRecordByUsnAndSemester,

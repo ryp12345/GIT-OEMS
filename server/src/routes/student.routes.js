@@ -10,6 +10,7 @@ router.get('/meta', authMiddleware, studentController.meta);
 router.post('/check', studentController.check);
 router.get('/template', authMiddleware, studentController.template);
 router.post('/import', authMiddleware, upload.single('file'), studentController.import);
+router.patch('/email', studentController.updateEmail);
 router.get('/', authMiddleware, studentController.list);
 router.post('/', authMiddleware, studentController.create);
 router.put('/:id', authMiddleware, studentController.update);

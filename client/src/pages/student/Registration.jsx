@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Notification from '../../components/common/Notification';
 import { submitPreferences } from '../../api/preferences.api';
-import { checkStudentDetails } from '../../api/student.api';
+import { checkStudentDetails, updateStudentEmail } from '../../api/student.api';
 
 export default function StudentRegistrationPage() {
   const location = useLocation();
@@ -17,6 +17,10 @@ export default function StudentRegistrationPage() {
   const [forcedCourseIds, setForcedCourseIds] = useState([]);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isSavingPreferences, setIsSavingPreferences] = useState(false);
+  const [emailValue, setEmailValue] = useState('');
+  const [showEmailPrompt, setShowEmailPrompt] = useState(false);
+  const [isEmailSaved, setIsEmailSaved] = useState(false);
+  const [hasSubmittedPreferences, setHasSubmittedPreferences] = useState(false);
   const [notification, setNotification] = useState({ show: false, message: '', type: 'info' });
   const [registrationNotice, setRegistrationNotice] = useState('');
   const isLearntOnlyForced = forcedCourseIds.length > 0;
@@ -30,7 +34,7 @@ export default function StudentRegistrationPage() {
       || normalized.includes('registration is currently closed')
       || normalized.includes('no active instance')
     ) {
-      return 'Elective preference is closed for now. Please contact admin.';
+      return 'Elective preference submission is currently closed. Please contact the administrator.';
     }
 
     return source;
@@ -72,6 +76,51 @@ export default function StudentRegistrationPage() {
     });
   }, [courses, selectedOrder]);
 
+  const isPreferencesLocked = hasSubmittedPreferences || Boolean(registeredPreferences?.length);
+
+  useEffect(() => {
+    if (!basic.usn) return;
+
+    const storedEmail = localStorage.getItem(`student_email:${String(basic.usn).toUpperCase()}`) || '';
+    const normalizedStoredEmail = String(storedEmail || '').trim();
+    setEmailValue((current) => current || normalizedStoredEmail);
+    setIsEmailSaved(Boolean(normalizedStoredEmail));
+    setShowEmailPrompt(!isPreferencesLocked && !String(normalizedStoredEmail || emailValue || '').trim());
+  }, [basic.usn, isPreferencesLocked, emailValue]);
+
+  function persistEmail(email) {
+    if (!basic.usn) return;
+    localStorage.setItem(`student_email:${String(basic.usn).toUpperCase()}`, email);
+  }
+
+  async function handleSaveEmail() {
+    const normalizedEmail = String(emailValue || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      setNotification({ show: true, message: 'Please enter your email address.', type: 'error' });
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setNotification({ show: true, message: 'Please enter a valid email address.', type: 'error' });
+      return;
+    }
+
+    try {
+      const response = await updateStudentEmail({ usn: basic.usn, email: normalizedEmail }, token);
+      const updatedStudent = response?.data?.data || response?.data || response || {};
+
+      persistEmail(normalizedEmail);
+      setEmailValue(normalizedEmail);
+      setIsEmailSaved(true);
+      setShowEmailPrompt(false);
+      setNotification({ show: true, message: `Email saved successfully. Confirmation will be sent to ${normalizedEmail}.`, type: 'success' });
+
+      setRegisteredPreferences((current) => current && updatedStudent?.email ? current : current);
+    } catch (err) {
+      setNotification({ show: true, message: err?.response?.data?.error || err?.message || 'Unable to save email', type: 'error' });
+    }
+  }
+
   async function handleProceed() {
     const trimmedUsn = basic.usn.trim();
     if (!trimmedUsn || !basic.uid || !basic.name) {
@@ -88,6 +137,8 @@ export default function StudentRegistrationPage() {
         setCourses([]);
         setSelectedOrder([]);
         setForcedCourseIds((data.forcedCourseIds || []).map((id) => String(id)));
+        setHasSubmittedPreferences(true);
+        setIsEmailSaved(Boolean(String(data?.student?.email || localStorage.getItem(`student_email:${String(trimmedUsn).toUpperCase()}`) || '').trim()));
       } else {
         if (!data.instance) {
           const formattedMessage = formatRegistrationMessage(data.message || 'No active elective instance for your semester');
@@ -118,6 +169,8 @@ export default function StudentRegistrationPage() {
         setCourses(flat);
         setForcedCourseIds(normalizedForced);
         setSelectedOrder(normalizedForced.length > 0 ? normalizedForced : preselected);
+        setHasSubmittedPreferences(false);
+        setIsEmailSaved(Boolean(String(data?.student?.email || localStorage.getItem(`student_email:${String(trimmedUsn).toUpperCase()}`) || '').trim()));
       }
       setRegistrationNotice('');
       // setShowBasic(false); // Keep basic details and Proceed button visible
@@ -162,6 +215,17 @@ export default function StudentRegistrationPage() {
   async function handleConfirmSubmission() {
     if (isSavingPreferences) return;
 
+    const normalizedEmail = String(emailValue || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      setNotification({ show: true, message: 'Please provide an email before confirming', type: 'error' });
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setNotification({ show: true, message: 'Please enter a valid email address.', type: 'error' });
+      return;
+    }
+
     const trimmedUsn = basic.usn.trim();
     const preferences = selectedPreferences.map((row) => ({
       instance_course_id: row.instance_course_id,
@@ -171,7 +235,9 @@ export default function StudentRegistrationPage() {
 
     try {
       setIsSavingPreferences(true);
-      await submitPreferences({ preferences }, token);
+      await submitPreferences({ preferences, email: normalizedEmail }, token);
+      persistEmail(normalizedEmail);
+      setIsEmailSaved(true);
 
       const refreshed = await checkStudentDetails({ uid1: basic.uid, name1: basic.name, usn: trimmedUsn }, token);
       const refreshedData = refreshed?.data || {};
@@ -181,10 +247,11 @@ export default function StudentRegistrationPage() {
         setCourses([]);
         setSelectedOrder([]);
         setForcedCourseIds((refreshedData.forcedCourseIds || []).map((id) => String(id)));
+        setHasSubmittedPreferences(true);
       }
 
       setIsConfirmOpen(false);
-      setNotification({ show: true, message: 'Preferences saved', type: 'success' });
+      setNotification({ show: true, message: `Preferences submitted successfully. A confirmation email has been sent to ${normalizedEmail}.`, type: 'success' });
     } catch (err) {
       setNotification({ show: true, message: err?.response?.data?.error || 'Failed to save', type: 'error' });
     } finally {
@@ -205,7 +272,7 @@ export default function StudentRegistrationPage() {
         />
 
         <h1 className="text-2xl font-semibold mb-2 text-center">Elective Registration</h1>
-        <p className="text-sm text-gray-600 mb-6">Follow the steps to save your preferences.</p>
+        <p className="text-sm text-gray-600 mb-6">Complete the following steps to submit your preferences.</p>
 
         {registrationNotice && (
           <div className="mb-6 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -231,6 +298,27 @@ export default function StudentRegistrationPage() {
             <div className="mt-4 text-right">
               <button type="button" onClick={() => setShowBasic(false)} className="mr-2 rounded border px-3 py-1">Back</button>
               <button type="button" onClick={handleProceed} className="rounded bg-blue-600 px-4 py-1 text-white">Proceed</button>
+            </div>
+          </div>
+        )}
+
+        {showCourses && !isPreferencesLocked && !isEmailSaved && (
+          <div className="mb-6 rounded-lg border border-indigo-200 bg-indigo-50 p-4 shadow-sm">
+            <div className="mb-2 font-medium text-indigo-900">Email Address</div>
+            <p className="mb-3 text-sm text-indigo-800">
+              {emailValue ? 'This email will be used for submission confirmation.' : 'Please enter an email address for submission confirmation.'}
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <input
+                type="email"
+                value={emailValue}
+                onChange={(e) => setEmailValue(e.target.value)}
+                placeholder="student@example.com"
+                className="min-w-0 flex-1 rounded border border-indigo-300 px-3 py-2"
+              />
+              <button type="button" onClick={handleSaveEmail} className="rounded bg-indigo-600 px-4 py-2 text-white">
+                Save Email
+              </button>
             </div>
           </div>
         )}
@@ -265,7 +353,7 @@ export default function StudentRegistrationPage() {
           </div>
         )}
 
-        {showCourses && !registeredPreferences && (
+        {showCourses && !isPreferencesLocked && !registeredPreferences && (
           <form onSubmit={handleSubmit} className="rounded-lg bg-white p-4 shadow">
             <h3 className="font-semibold mb-3">Available Courses</h3>
             {isLearntOnlyForced && (
@@ -358,6 +446,12 @@ export default function StudentRegistrationPage() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {isPreferencesLocked && (
+          <div className="mt-6 rounded border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                    Preferences have already been submitted for this student.
           </div>
         )}
       </div>

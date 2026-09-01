@@ -1,4 +1,6 @@
 const preferencesModel = require('../models/preferences.model');
+const studentModel = require('../models/student.model');
+const emailService = require('./email.service');
 const pool = require('../config/db');
 
 function normalizeCode(value) {
@@ -135,6 +137,8 @@ async function validatePreferencesInstanceIsActive(preferences) {
 
 async function submitPreferences(payload = {}) {
 	const preferences = Array.isArray(payload.preferences) ? payload.preferences : [];
+	const email = String(payload.email || '').trim().toLowerCase();
+	const usn = preferences.length > 0 ? String(preferences[0].usn || '').trim().toUpperCase() : '';
 
 	if (preferences.length === 0) {
 		const error = new Error('No preferences provided');
@@ -162,10 +166,32 @@ async function submitPreferences(payload = {}) {
 		}
 	}
 
+	if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+		const error = new Error('A valid email is required before saving preferences');
+		error.statusCode = 400;
+		throw error;
+	}
+
 	await validatePreferencesInstanceIsActive(preferences);
 	await validateLearntOnlyCompulsoryPreferences(preferences);
+	const studentRow = await pool.query(
+		`SELECT name, usn, email
+		 FROM public.students
+		 WHERE UPPER(usn) = UPPER($1)
+		 LIMIT 1`,
+		[usn]
+	);
+	const studentName = studentRow.rows[0]?.name || '';
+	await studentModel.updateStudentEmailByUsn(usn, email);
 
 	await preferencesModel.insertPreferences(preferences);
+	const preferenceDetails = await preferencesModel.getPreferenceSubmissionDetails(preferences);
+	await emailService.sendPreferenceConfirmationEmail({
+		to: email,
+		usn,
+		studentName,
+		preferences: preferenceDetails
+	});
 	return { message: 'Preferences saved successfully', count: preferences.length };
 }
 

@@ -73,6 +73,15 @@ exports.remove = async (req, res, next) => {
 	}
 };
 
+exports.updateEmail = async (req, res, next) => {
+	try {
+		const updated = await studentService.updateStudentEmail(req.body?.usn, req.body?.email);
+		res.json(updated);
+	} catch (error) {
+		next(error);
+	}
+};
+
 exports.check = async (req, res, next) => {
   try {
     const data = await studentService.checkName(req.body || {});
